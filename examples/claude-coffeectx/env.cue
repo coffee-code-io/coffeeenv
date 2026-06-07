@@ -8,9 +8,13 @@ import (
 	"coffeeenv.dev/lib/coffeectx"
 )
 
+// Top-level field carrying the install-confirmation prompt (the resolver only
+// scans top-level fields, not the `states` output).
+confirm: coffeectx.#Confirm
+
 states: (agent.#Render & {
 	targets: [
 		claude.#Claude,
-		coffeectx.#Install,
+		coffeectx.#Install & {"confirm": confirm},
 	]
 }).states

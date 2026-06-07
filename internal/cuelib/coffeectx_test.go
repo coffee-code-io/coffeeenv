@@ -5,13 +5,16 @@ import (
 	"testing"
 )
 
-// TestCoffeectxInstall: the no-prompt module installs @coffeectx/server, registers
-// the MCP server, and adds the CoffeeCtx paragraph (via the Claude renderer).
+// TestCoffeectxInstall: with confirm=true the module installs @coffeectx/server,
+// registers the MCP server (non-pi agent), and adds the CoffeeCtx paragraph (via
+// the Claude renderer).
 func TestCoffeectxInstall(t *testing.T) {
-	raws, err := EvalStates(exampleDir("claude-coffeectx"), Opts{Engine: "global", Root: "~"})
+	given := map[string]string{"confirm": "true"}
+	r, err := Resolve(exampleDir("claude-coffeectx"), Opts{Engine: "global", Root: "~"}, given, nil)
 	if err != nil {
-		t.Fatalf("EvalStates: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
+	raws := r.States
 	m := byName(raws)
 	if _, ok := m["coffeectx-server"]; !ok {
 		t.Errorf("missing @coffeectx/server npm state; got %v", names(raws))
@@ -38,14 +41,19 @@ func TestCoffeectxInstall(t *testing.T) {
 // generates ~/.coffeecode/config.yaml plus the pi extension.
 func TestCoffeectxSetup(t *testing.T) {
 	given := map[string]string{
-		"projects[0].repoPath":      "/home/me/repo",
-		"projects[0].embedProvider": "openai",
-		"projects[0].lspCommand":    "typescript-language-server --stdio",
-		"projects[0].lspInstall":    "npm i -g typescript-language-server",
-		"projects[0].installPiExt":  "true",
-		"projects[0].skills":        "api,contract",
+		"projects[0].repoPath":  "/home/me/repo",
+		"projects[0].language":  "typescript",
+		"projects[0].skills":    "api,contract",
+		"projects[0].jobs":      "reindex",
+		"input.confirm":         "true",
+		"input.apiKey":          "sk-test",
+		"input.baseUrl":         "https://api.example.com",
+		"input.embeddingsModel": "embed-1",
+		"input.indexerModel":    "index-1",
+		"input.uiModel":         "ui-1",
+		"input.autolaunch":      "true",
 	}
-	r, err := Resolve(exampleDir("coffeectx-setup"), Opts{Engine: "global", Root: "~"}, given, nil)
+	r, err := Resolve(exampleDir("coffeectx-setup"), Opts{Engine: "global", Root: "~", OS: "darwin"}, given, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -70,7 +78,29 @@ func TestCoffeectxSetup(t *testing.T) {
 	if got, _ := myrepo["repoPath"].(string); got != "/home/me/repo" {
 		t.Errorf("config repoPath = %v", got)
 	}
-	if _, ok := m["coffeectx-pi-ext"]; !ok {
-		t.Errorf("installPiExt=true should emit the pi extension; got %v", names(r.States))
+
+	// Global auth + models land in the config.
+	auth, _ := data["auth"].(map[string]any)
+	if got, _ := auth["key"].(string); got != "sk-test" {
+		t.Errorf("config auth.key = %v", got)
+	}
+	models, _ := data["models"].(map[string]any)
+	if got, _ := models["embeddings"].(string); got != "embed-1" {
+		t.Errorf("config models.embeddings = %v", got)
+	}
+
+	// A claude (non-pi) agent registers the MCP and does NOT emit the pi extension.
+	if _, ok := m["coffeectx-pi-ext"]; ok {
+		t.Errorf("non-pi agent should not emit the pi extension; got %v", names(r.States))
+	}
+
+	// Enabled skills are installed into the coffeecode skill dir, jobs into the job dir.
+	if _, ok := m["coffeecode-job-reindex"]; !ok {
+		t.Errorf("registered job should be installed to ~/.coffeecode/jobs; got %v", names(r.States))
+	}
+
+	// autolaunch=true on a darwin global install writes the launchd plist.
+	if _, ok := m["coffeectx-launchd"]; !ok {
+		t.Errorf("autolaunch on darwin should emit the launchd plist; got %v", names(r.States))
 	}
 }

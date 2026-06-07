@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"cuelang.org/go/cue"
@@ -26,6 +27,7 @@ const userModule = "coffeeenv.dev/user"
 type Opts struct {
 	Engine string // "global" | "local"
 	Root   string // "~" for global; the venv dir for local
+	OS     string // host GOOS ("darwin", "linux", ...); empty defaults to runtime.GOOS
 }
 
 // buildBase loads the chart's *.cue from chartDir, overlays the embedded library
@@ -117,11 +119,15 @@ func injectContext(overlay map[string]load.Source, venvAbs string, opts Opts) {
 	if root == "" {
 		root = "~"
 	}
+	goos := opts.OS
+	if goos == "" {
+		goos = runtime.GOOS
+	}
 	pkgRoot := filepath.Join(venvAbs, "cue.mod", "pkg", filepath.FromSlash(libModule))
 	// NB: CUE's loader ignores files beginning with "_" or ".", so the injected
 	// file must not start with an underscore.
 	path := filepath.Join(pkgRoot, "context", "inject.cue")
-	src := fmt.Sprintf("package context\nengine: %q\nroot: %q\n", opts.Engine, root)
+	src := fmt.Sprintf("package context\nengine: %q\nroot: %q\nos: %q\n", opts.Engine, root, goos)
 	overlay[path] = load.FromString(src)
 }
 

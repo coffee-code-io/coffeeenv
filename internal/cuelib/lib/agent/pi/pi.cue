@@ -1,6 +1,9 @@
-// Package claude renders the shared agent Context into Claude Code's layout:
-// ~/.claude/CLAUDE.md, ~/.claude/skills/<name>/SKILL.md, and ~/.claude.json.
-package claude
+// Package pi renders the shared agent Context into pi.dev's layout under
+// ~/.pi/agent: AGENTS.md, skills/<name>/SKILL.md, and mcp.json. pi.dev's exact
+// package name and config paths should be confirmed against the real CLI; the
+// ~/.pi/agent base matches the extension path coffeectx already targets
+// (~/.pi/agent/extensions/coffeectx.ts).
+package pi
 
 import (
 	"strings"
@@ -9,8 +12,8 @@ import (
 	st "coffeeenv.dev/lib/states"
 )
 
-// #Claude is an agent target: place it in a chart's targets list.
-#Claude: agent.#Target & {
+// #Pi is an agent target: place it in a chart's targets list.
+#Pi: agent.#Target & {
 	// ctx is provided by agent.#Render; redeclared here so bare `ctx` references
 	// below resolve lexically within this conjunct.
 	ctx: agent.#Context
@@ -18,7 +21,7 @@ import (
 	version: string | *"latest"
 
 	// Announce the active agent so agent-agnostic libraries can branch on it.
-	register: agent: "claude"
+	register: agent: "pi"
 
 	// _home is "~" (global) or the venv root (local).
 	_home:  context.root
@@ -26,36 +29,36 @@ import (
 
 	states: [
 		st.#NpmState & {
-			name:    "claude-code"
-			package: "@anthropic-ai/claude-code"
+			name:    "pi-cli"
+			package: "@pi-dev/cli"
 			version: version
 			if _local {prefix: context.root}
 		},
 		if len(ctx.agentMd) > 0 {
 			st.#FileState & {
-				name:    "claude-claudemd"
-				path:    "\(_home)/.claude/CLAUDE.md"
+				name:    "pi-agents"
+				path:    "\(_home)/.pi/agent/AGENTS.md"
 				content: strings.Join(ctx.agentMd, "\n\n")
 			}
 		},
 		for sname, sk in ctx.skills {
 			st.#FileState & {
-				name:    "claude-skill-\(sname)"
-				path:    "\(_home)/.claude/skills/\(sname)/SKILL.md"
+				name:    "pi-skill-\(sname)"
+				path:    "\(_home)/.pi/agent/skills/\(sname)/SKILL.md"
 				content: sk.body
 			}
 		},
 		for sname, sk in ctx.skills for fpath, fcontent in sk.files {
 			st.#FileState & {
-				name:    "claude-skill-\(sname)-file"
-				path:    "\(_home)/.claude/skills/\(sname)/\(fpath)"
+				name:    "pi-skill-\(sname)-file"
+				path:    "\(_home)/.pi/agent/skills/\(sname)/\(fpath)"
 				content: fcontent
 			}
 		},
 		if len(ctx.mcps) > 0 {
 			st.#FileState & {
-				name:   "claude-mcp"
-				path:   "\(_home)/.claude.json"
+				name:   "pi-mcp"
+				path:   "\(_home)/.pi/agent/mcp.json"
 				format: "json"
 				data: mcpServers: {
 					for mname, m in ctx.mcps {
@@ -71,8 +74,8 @@ import (
 		},
 		if _local {
 			st.#EnvState & {
-				name:   "CLAUDE_CONFIG_DIR"
-				value:  "\(context.root)/.claude"
+				name:   "PI_HOME"
+				value:  "\(context.root)/.pi"
 				target: "\(context.root)/env.sh"
 			}
 		},

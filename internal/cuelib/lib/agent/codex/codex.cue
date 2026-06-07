@@ -18,6 +18,9 @@ import (
 
 	version: string | *"latest"
 
+	// Announce the active agent so agent-agnostic libraries can branch on it.
+	register: agent: "codex"
+
 	_home:  context.root
 	_local: context.engine == "local"
 
