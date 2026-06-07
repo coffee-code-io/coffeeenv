@@ -1,0 +1,7 @@
+# Cross-compiled binaries (produced by npm/scripts/build-binaries.mjs at publish time)
+/npm/vendor/
+# Node
+/npm/node_modules/
+# Local build output
+/coffeeenv
+/dist/

@@ -1,0 +1,27 @@
+{
+  "name": "@coffeectx/coffeeenv",
+  "version": "0.1.0",
+  "description": "Declarative environment manager for AI coding setups (CUE-driven). Ships the coffeeenv binary.",
+  "bin": {
+    "coffeeenv": "./bin/coffeeenv.cjs"
+  },
+  "files": [
+    "bin",
+    "vendor"
+  ],
+  "scripts": {
+    "build": "node scripts/build-binaries.mjs",
+    "prepublishOnly": "node scripts/build-binaries.mjs"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coffee-code-io/coffeeenv.git"
+  },
+  "license": "MIT"
+}
