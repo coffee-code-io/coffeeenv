@@ -46,8 +46,9 @@ func TestCoffeectxSetup(t *testing.T) {
 		"projects[0].skills":    "api,contract",
 		"projects[0].jobs":      "reindex",
 		"input.confirm":         "true",
+		"input.authType":        "apiKey",
+		"input.url":             "https://api.example.com",
 		"input.apiKey":          "sk-test",
-		"input.baseUrl":         "https://api.example.com",
 		"input.embeddingsModel": "embed-1",
 		"input.indexerModel":    "index-1",
 		"input.uiModel":         "ui-1",
@@ -79,14 +80,44 @@ func TestCoffeectxSetup(t *testing.T) {
 		t.Errorf("config repoPath = %v", got)
 	}
 
-	// Global auth + models land in the config.
-	auth, _ := data["auth"].(map[string]any)
-	if got, _ := auth["key"].(string); got != "sk-test" {
-		t.Errorf("config auth.key = %v", got)
+	// Embedding auth: an AuthSettings block under core.embed.auth with the
+	// embeddings model and shared credential.
+	core, _ := myrepo["core"].(map[string]any)
+	embed, _ := core["embed"].(map[string]any)
+	embedAuth, _ := embed["auth"].(map[string]any)
+	if got, _ := embedAuth["authType"].(string); got != "apiKey" {
+		t.Errorf("embed auth.authType = %v", got)
 	}
-	models, _ := data["models"].(map[string]any)
-	if got, _ := models["embeddings"].(string); got != "embed-1" {
-		t.Errorf("config models.embeddings = %v", got)
+	if got, _ := embedAuth["url"].(string); got != "https://api.example.com" {
+		t.Errorf("embed auth.url = %v", got)
+	}
+	if got, _ := embedAuth["apiKey"].(string); got != "sk-test" {
+		t.Errorf("embed auth.apiKey = %v", got)
+	}
+	if got, _ := embedAuth["model"].(string); got != "embed-1" {
+		t.Errorf("embed auth.model = %v", got)
+	}
+
+	// UI agent auth: agent.auth carries the ui model.
+	agent, _ := myrepo["agent"].(map[string]any)
+	agentAuth, _ := agent["auth"].(map[string]any)
+	if got, _ := agentAuth["model"].(string); got != "ui-1" {
+		t.Errorf("agent auth.model = %v", got)
+	}
+
+	// Enabled job carries the indexer model in parameters.auth.
+	jobs, _ := myrepo["jobs"].(map[string]any)
+	reindex, _ := jobs["reindex"].(map[string]any)
+	if reindex == nil {
+		t.Fatalf("jobs.reindex missing; jobs=%#v", jobs)
+	}
+	if got, _ := reindex["enabled"].(bool); !got {
+		t.Errorf("jobs.reindex.enabled = %v, want true", reindex["enabled"])
+	}
+	params, _ := reindex["parameters"].(map[string]any)
+	jobAuth, _ := params["auth"].(map[string]any)
+	if got, _ := jobAuth["model"].(string); got != "index-1" {
+		t.Errorf("jobs.reindex parameters.auth.model = %v", got)
 	}
 
 	// A claude (non-pi) agent registers the MCP and does NOT emit the pi extension.

@@ -84,13 +84,27 @@ _agentRegister: {
 // hands it to #Setup. autolaunch is only meaningful on a global install; on a
 // venv install it unifies to a concrete false and is never prompted.
 #SetupInput: {
-	confirm:         bool   @input("Install coffeectx for this agent? (true/false)", order=1)
-	apiKey:          string @input("API key", order=10)
-	baseUrl:         string @input("API base URL", order=11)
-	embeddingsModel: string @input("Embeddings model", order=12)
-	indexerModel:    string @input("Indexer model", order=13)
-	uiModel:         string @input("UI model", order=14)
-	autolaunch:      bool   @input("Auto-launch the coffeectx daemon on login? (true/false)", order=20)
+	confirm: bool @input("Install coffeectx for this agent? (true/false)", order=1)
+
+	// Auth follows AuthSettings (retrival-mcp packages/core/src/auth.ts): one
+	// common credential shared across every block, a separate model per block.
+	// authType is prompted first; the credential fields below only apply in
+	// apiKey mode — in openai-oauth mode pi.dev holds the credentials, so they're
+	// forced empty and never prompted.
+	authType: "apiKey" | "openai-oauth" @input("Auth type (apiKey/openai-oauth)", order=10)
+	url:      string @input("API base URL (OpenAI-compatible endpoint)", order=11)
+	apiKey:   string @input("API key", order=12)
+	if authType == "openai-oauth" {
+		url:    ""
+		apiKey: ""
+	}
+
+	// One model per consumer (embeddings, job agents, UI agent).
+	embeddingsModel: string @input("Embeddings model", order=20)
+	indexerModel:    string @input("Indexer (job agent) model", order=21)
+	uiModel:         string @input("UI agent model", order=22)
+
+	autolaunch: bool @input("Auto-launch the coffeectx daemon on login? (true/false)", order=30)
 	if context.engine != "global" {
 		autolaunch: false
 	}
@@ -105,6 +119,11 @@ _agentRegister: {
 	version: string | *"latest"
 	confirm: bool
 	_local:  context.engine == "local"
+	// _home is the base that holds .coffeecode (and .pi): "~" (i.e. $HOME) for a
+	// global install, the venv root for a local one. coffeectx itself looks for
+	// .coffeecode under $COFFEECODE_HOME (default $HOME); _envStates points that
+	// at the venv on local installs.
+	_home: context.root
 
 	register: (_agentRegister & {"confirm": confirm, "ctx": ctx}).out
 
@@ -130,7 +149,7 @@ _agentRegister: {
 		if confirm if ctx.agent == "pi" {
 			st.#FileState & {
 				name:    "coffeectx-pi-ext"
-				path:    "~/.pi/agent/extensions/coffeectx.ts"
+				path:    "\(_home)/.pi/agent/extensions/coffeectx.ts"
 				content: "export { default } from '@coffeectx/pi-plugin';\n"
 			}
 		},
@@ -141,7 +160,7 @@ _agentRegister: {
 		for sname, sk in ctx.skills {
 			st.#FileState & {
 				name:    "coffeecode-skill-\(sname)"
-				path:    "~/.coffeecode/skills/\(sname)/SKILL.md"
+				path:    "\(_home)/.coffeecode/skills/\(sname)/SKILL.md"
 				content: sk.body
 			}
 		},
@@ -149,13 +168,24 @@ _agentRegister: {
 		for sname, sk in ctx.skills for fpath, fcontent in sk.files {
 			st.#FileState & {
 				name:    "coffeecode-skill-\(sname)-file"
-				path:    "~/.coffeecode/skills/\(sname)/\(fpath)"
+				path:    "\(_home)/.coffeecode/skills/\(sname)/\(fpath)"
 				content: fcontent
 			}
 		},
 	]
+	// On a local install, point coffeectx at the venv so it reads/writes the
+	// venv's .coffeecode rather than $HOME's.
+	_envStates: [
+		if _local {
+			st.#EnvState & {
+				name:   "COFFEECODE_HOME"
+				value:  context.root
+				target: "\(context.root)/env.sh"
+			}
+		},
+	]
 
-	states: _serverStates + _piStates + _skillStates
+	states: _serverStates + _piStates + _skillStates + _envStates
 }
 
 // #Project describes one coffeectx project. `name` is supplied by the chart;
@@ -182,18 +212,31 @@ _agentRegister: {
 	// #SetupInput); destructure it into the locals the body uses.
 	input:           #SetupInput
 	confirm:         input.confirm
-	apiKey:          input.apiKey
-	baseUrl:         input.baseUrl
 	embeddingsModel: input.embeddingsModel
 	indexerModel:    input.indexerModel
 	uiModel:         input.uiModel
 	autolaunch:      input.autolaunch
+
+	// _authCommon is the shared credential reused by every auth block; each block
+	// adds its own model. In openai-oauth mode only authType is carried (pi.dev
+	// resolves the rest). Reference input.* directly to avoid a field shadowing
+	// its own name (authType: authType would self-cycle).
+	_authCommon: {
+		authType: input.authType
+		if input.authType == "apiKey" {
+			url:    input.url
+			apiKey: input.apiKey
+		}
+	}
 
 	// Untyped so `& {projects: chartProjects}` doesn't create a separate
 	// unification node that FillPath (applied to the chart field) can't reach.
 	// The chart supplies #Project-typed elements.
 	projects: [...]
 	_local: context.engine == "local"
+	// _home is the base that holds .coffeecode (and .pi): "~" (i.e. $HOME) for a
+	// global install, the venv root for a local one. See COFFEECODE_HOME below.
+	_home: context.root
 
 	// Project a plain-struct list first. A dynamic-key map comprehension
 	// (`(p.name): …`) directly over the #Project-typed list yields an
@@ -207,30 +250,35 @@ _agentRegister: {
 		jobs:     p.jobs
 	}}]
 
-	// ~/.coffeecode/config.yaml mirrored from the CoffeectxConfig schema.
+	// <_home>/.coffeecode/config.yaml mirrored from the CoffeectxConfig schema
+	// (retrival-mcp packages/core/src/config.ts). Auth is an AuthSettings block
+	// per consumer: core.embed.auth (embeddings), agent.auth (UI), and every
+	// enabled job's parameters.auth (job agents).
 	_config: {
-		auth: {key: apiKey, url: baseUrl}
-		models: {embeddings: embeddingsModel, indexer: indexerModel, ui: uiModel}
 		projects: {
 			for p in _plain {
 				(p.name): {
-					db:       "~/.coffeecode/db/\(p.name).db"
+					db:       "\(_home)/.coffeecode/db/\(p.name).db"
 					repoPath: p.repoPath
 					enabled:  true
+					core: embed: auth: _authCommon & {model: embeddingsModel}
+					agent: auth: _authCommon & {model:       uiModel}
 					mcp: tools: {search: true, exact: true, regex: true, raw_query: true, load_node: true, insert: false}
 					if p.language != "" {
-						jobs: lsp: {enabled: true, parameters: lspCommand: lsplib.catalog[p.language].command}
+						jobs: lsp: {enabled: true, parameters: {lspCommand: lsplib.catalog[p.language].command}}
 					}
 					if p.skills != "" {
 						skills: jobs: include: strings.Split(p.skills, ",")
 					}
 					if p.jobs != "" {
-						jobs: include: strings.Split(p.jobs, ",")
+						for jn in strings.Split(p.jobs, ",") {
+							jobs: (jn): {enabled: true, parameters: {auth: _authCommon & {model: indexerModel}}}
+						}
 					}
 				}
 			}
 		}
-		types: userDir: "~/.coffeecode/types"
+		types: userDir: "\(_home)/.coffeecode/types"
 	}
 
 	register: (_agentRegister & {"confirm": confirm, "ctx": ctx}).out
@@ -257,7 +305,7 @@ _agentRegister: {
 		if confirm if ctx.agent == "pi" {
 			st.#FileState & {
 				name:    "coffeectx-pi-ext"
-				path:    "~/.pi/agent/extensions/coffeectx.ts"
+				path:    "\(_home)/.pi/agent/extensions/coffeectx.ts"
 				content: "export { default } from '@coffeectx/pi-plugin';\n"
 			}
 		},
@@ -267,7 +315,7 @@ _agentRegister: {
 		for sname, sk in ctx.skills {
 			st.#FileState & {
 				name:    "coffeecode-skill-\(sname)"
-				path:    "~/.coffeecode/skills/\(sname)/SKILL.md"
+				path:    "\(_home)/.coffeecode/skills/\(sname)/SKILL.md"
 				content: sk.body
 			}
 		},
@@ -275,7 +323,7 @@ _agentRegister: {
 		for sname, sk in ctx.skills for fpath, fcontent in sk.files {
 			st.#FileState & {
 				name:    "coffeecode-skill-\(sname)-file"
-				path:    "~/.coffeecode/skills/\(sname)/\(fpath)"
+				path:    "\(_home)/.coffeecode/skills/\(sname)/\(fpath)"
 				content: fcontent
 			}
 		},
@@ -286,7 +334,7 @@ _agentRegister: {
 		for jname, j in ctx.coffeectx.jobs {
 			st.#FileState & {
 				name:    "coffeecode-job-\(jname)"
-				path:    "~/.coffeecode/jobs/\(jname)/JOB.md"
+				path:    "\(_home)/.coffeecode/jobs/\(jname)/JOB.md"
 				content: j.body
 			}
 		},
@@ -294,7 +342,7 @@ _agentRegister: {
 		for jname, j in ctx.coffeectx.jobs for fpath, fcontent in j.files {
 			st.#FileState & {
 				name:    "coffeecode-job-\(jname)-file"
-				path:    "~/.coffeecode/jobs/\(jname)/\(fpath)"
+				path:    "\(_home)/.coffeecode/jobs/\(jname)/\(fpath)"
 				content: fcontent
 			}
 		},
@@ -303,9 +351,31 @@ _agentRegister: {
 	_configStates: [
 		st.#FileState & {
 			name:   "coffeecode-config"
-			path:   "~/.coffeecode/config.yaml"
+			path:   "\(_home)/.coffeecode/config.yaml"
 			format: "yaml"
 			data:   _config
+		},
+	]
+	// On a local install, point coffeectx at the venv so it reads/writes the
+	// venv's .coffeecode rather than $HOME's.
+	_envStates: [
+		if _local {
+			st.#EnvState & {
+				name:   "COFFEECODE_HOME"
+				value:  context.root
+				target: "\(context.root)/env.sh"
+			}
+		},
+	]
+	// In openai-oauth mode the credentials live in pi.dev's auth store, populated
+	// by an interactive login. Run it (the server binary providing `coffeectx` is
+	// installed by _serverStates above).
+	_loginStates: [
+		if input.authType == "openai-oauth" {
+			st.#ShellState & {
+				name: "coffeectx-oauth-login"
+				run:  "coffeectx login openai-oauth"
+			}
 		},
 	]
 
@@ -370,5 +440,5 @@ _agentRegister: {
 		},
 	]
 
-	states: _configStates + _serverStates + _piStates + _skillStates + _jobStates + _autolaunchStates
+	states: _configStates + _serverStates + _piStates + _skillStates + _jobStates + _envStates + _loginStates + _autolaunchStates
 }
