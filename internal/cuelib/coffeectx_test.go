@@ -9,7 +9,7 @@ import (
 // registers the MCP server (non-pi agent), and adds the CoffeeCtx paragraph (via
 // the Claude renderer).
 func TestCoffeectxInstall(t *testing.T) {
-	given := map[string]string{"confirm": "true"}
+	given := map[string]string{"coffeectx.confirm": "true"}
 	r, err := Resolve(exampleDir("claude-coffeectx"), Opts{Engine: "global", Root: "~"}, given, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -41,18 +41,18 @@ func TestCoffeectxInstall(t *testing.T) {
 // generates ~/.coffeecode/config.yaml plus the pi extension.
 func TestCoffeectxSetup(t *testing.T) {
 	given := map[string]string{
-		"projects[0].repoPath":  "/home/me/repo",
-		"projects[0].language":  "typescript",
-		"projects[0].skills":    "api,contract",
-		"projects[0].jobs":      "reindex",
-		"input.confirm":         "true",
-		"input.authType":        "apiKey",
-		"input.url":             "https://api.example.com",
-		"input.apiKey":          "sk-test",
-		"input.embeddingsModel": "embed-1",
-		"input.indexerModel":    "index-1",
-		"input.uiModel":         "ui-1",
-		"input.autolaunch":      "true",
+		"coffeectx.projects.myrepo.repoPath": "/home/me/repo",
+		"coffeectx.projects.myrepo.language": "typescript",
+		"coffeectx.projects.myrepo.skills":   "api,contract",
+		"coffeectx.projects.myrepo.jobs":     "reindex",
+		"coffeectx.confirm":                  "true",
+		"coffeectx.authType":                 "apiKey",
+		"coffeectx.url":                      "https://api.example.com",
+		"coffeectx.apiKey":                   "sk-test",
+		"coffeectx.embeddingsModel":          "embed-1",
+		"coffeectx.indexerModel":             "index-1",
+		"coffeectx.uiModel":                  "ui-1",
+		"coffeectx.autolaunch":               "true",
 	}
 	r, err := Resolve(exampleDir("coffeectx-setup"), Opts{Engine: "global", Root: "~", OS: "darwin"}, given, nil)
 	if err != nil {

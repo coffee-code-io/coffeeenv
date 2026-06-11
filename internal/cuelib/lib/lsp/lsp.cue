@@ -1,13 +1,13 @@
 // Package lsp is a standalone, language-keyed catalog of language servers. It
-// exports `catalog` (language -> {command, install}) and the #LSP target, which
-// takes only a language, installs the server, and exposes the resolved
-// `command`. It does not depend on coffeectx; coffeectx imports `catalog` to
-// resolve a project's language into the command it writes to config.yaml.
+// exports `catalog` (language -> {command, install}) and the #LSP mixin, which
+// takes only a language, installs the server (a shell state in the global
+// `states` map), and exposes the resolved `command`. It does not depend on
+// coffeectx; coffeectx imports `catalog` to resolve a project's language into
+// the command it writes to config.yaml.
 package lsp
 
 import (
 	"strings"
-	"coffeeenv.dev/lib/agent"
 	st "coffeeenv.dev/lib/states"
 )
 
@@ -22,18 +22,18 @@ catalog: {
 }
 
 // #LSP installs the language server for `language` and exposes the resolved
-// `command`. Input is only the language; everything else comes from `catalog`.
-#LSP: agent.#Target & {
+// `command`. Embed it at the top level: `lsp.#LSP & {language: "go"}`. Input is
+// only the language; everything else comes from `catalog`.
+#LSP: {
 	language: string @input("Language for the LSP server")
 
 	_entry:  catalog[language]
 	command: _entry.command
 
-	states: [
-		st.#ShellState & {
-			name:   "lsp-install-\(language)"
+	states: {
+		"lsp-install-\(language)": st.#ShellState & {
 			run:    _entry.install
 			unless: "command -v \(strings.Fields(_entry.command)[0]) >/dev/null 2>&1"
-		},
-	]
+		}
+	}
 }

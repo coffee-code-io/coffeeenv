@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"cuelang.org/go/cue"
@@ -64,9 +65,14 @@ func buildBase(chartDir string, opts Opts, extra map[string]string) (*cue.Contex
 
 	ctx := cuecontext.New()
 	v := ctx.BuildInstance(inst)
-	if err := v.Err(); err != nil {
-		return nil, cue.Value{}, "", fmt.Errorf("build CUE: %w", err)
-	}
+	// Deliberately NOT v.Err() here. The base is built before inputs are
+	// resolved, so the top-level value is expected to be incomplete — and
+	// v.Err() returns the error a value *represents*, which for a pending
+	// top-level comprehension (e.g. `if <unresolved input> {…}` writing into a
+	// namespace) is an "incomplete" error even though nothing is actually wrong.
+	// v.Validate() (no Concrete) reports genuine conflicts recursively while
+	// tolerating incompleteness, which is what we want until the final concrete
+	// check after resolution.
 	if err := v.Validate(); err != nil {
 		return nil, cue.Value{}, "", fmt.Errorf("evaluate CUE: %w", err)
 	}
@@ -141,28 +147,88 @@ func ensureUserModule(overlay map[string]load.Source, venvAbs string) {
 	overlay[modPath] = load.FromString(fmt.Sprintf("module: %q\nlanguage: version: \"v0.9.0\"\n", userModule))
 }
 
-// decodeRawStates decodes the `states` list as generic maps, then splits each
-// element into a typed/name/params triple.
+// decodeRawStates decodes the `states` field into a flat ordered RawState list.
+// Two shapes are accepted: a list (authored order is preserved) or a map keyed
+// by name (the new framework form), flattened sorted by (order, key). In the
+// map form the key is the state's name; in the list form `name` is read from the
+// element. `type` and `order` are stripped from the param bag.
 func decodeRawStates(statesV cue.Value) ([]state.RawState, error) {
-	var maps []map[string]any
-	if err := statesV.Decode(&maps); err != nil {
-		return nil, fmt.Errorf("decode states: %w", err)
-	}
-	out := make([]state.RawState, 0, len(maps))
-	for i, m := range maps {
-		typ, _ := m["type"].(string)
-		if typ == "" {
-			return nil, fmt.Errorf("states[%d]: missing `type`", i)
+	switch statesV.IncompleteKind() {
+	case cue.ListKind:
+		var maps []map[string]any
+		if err := statesV.Decode(&maps); err != nil {
+			return nil, fmt.Errorf("decode states list: %w", err)
 		}
-		name, _ := m["name"].(string)
-		params := make(map[string]any, len(m))
-		for k, val := range m {
-			if k == "type" {
-				continue
+		out := make([]state.RawState, 0, len(maps))
+		for i, m := range maps {
+			name, _ := m["name"].(string)
+			rs, err := rawFromMap(m, name)
+			if err != nil {
+				return nil, fmt.Errorf("states[%d]: %w", i, err)
 			}
-			params[k] = val
+			out = append(out, rs)
 		}
-		out = append(out, state.RawState{Type: typ, Name: name, Params: params})
+		return out, nil
+	case cue.StructKind:
+		var byKey map[string]map[string]any
+		if err := statesV.Decode(&byKey); err != nil {
+			return nil, fmt.Errorf("decode states map: %w", err)
+		}
+		type entry struct {
+			key   string
+			order int
+			rs    state.RawState
+		}
+		entries := make([]entry, 0, len(byKey))
+		for key, m := range byKey {
+			rs, err := rawFromMap(m, key)
+			if err != nil {
+				return nil, fmt.Errorf("states[%q]: %w", key, err)
+			}
+			entries = append(entries, entry{key: key, order: orderOf(m), rs: rs})
+		}
+		sort.SliceStable(entries, func(i, j int) bool {
+			if entries[i].order != entries[j].order {
+				return entries[i].order < entries[j].order
+			}
+			return entries[i].key < entries[j].key
+		})
+		out := make([]state.RawState, len(entries))
+		for i, e := range entries {
+			out[i] = e.rs
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("states must be a list or a map, got %v", statesV.IncompleteKind())
 	}
-	return out, nil
+}
+
+// rawFromMap splits a decoded state object into a typed/name/params triple,
+// dropping the meta fields `type` and `order` from the param bag.
+func rawFromMap(m map[string]any, name string) (state.RawState, error) {
+	typ, _ := m["type"].(string)
+	if typ == "" {
+		return state.RawState{}, fmt.Errorf("missing `type`")
+	}
+	params := make(map[string]any, len(m))
+	for k, val := range m {
+		if k == "type" || k == "order" {
+			continue
+		}
+		params[k] = val
+	}
+	return state.RawState{Type: typ, Name: name, Params: params}, nil
+}
+
+// orderOf reads the numeric `order` meta field (defaulting large when absent).
+func orderOf(m map[string]any) int {
+	switch v := m["order"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	}
+	return 1 << 30
 }

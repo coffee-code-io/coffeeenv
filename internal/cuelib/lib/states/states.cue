@@ -1,13 +1,20 @@
 // Package states defines the fixed-parameter basic state schemas that the Go
-// execution layer understands. High-level helpers (claude, codex) expand into
-// lists of these.
+// execution layer understands. High-level helpers (claude, codex, coffeectx)
+// expand into a map of these, keyed by a stable name.
+//
+// `order` gives the Go layer a stable apply order independent of map iteration:
+// states are flattened sorted by (order, key). Defaults group by kind —
+// installs (25) before files (50) before env (60) before shell (75) — and ties
+// break by key. `name` is optional: in the map form the map key is the name; in
+// the list form a chart sets `name` explicitly.
 package states
 
 // #NpmState installs a package. With prefix empty it installs globally (-g);
 // with prefix set it installs into that directory (bins land in <prefix>/bin).
 #NpmState: {
 	type:     "npm"
-	name:     string
+	name?:    string
+	order:    int | *25
 	package:  string
 	version:  string | *"latest"
 	prefix?:  string
@@ -17,7 +24,8 @@ package states
 // #PnpmState installs a package via pnpm. prefix behaves as for #NpmState.
 #PnpmState: {
 	type:    "pnpm"
-	name:    string
+	name?:   string
+	order:   int | *25
 	package: string
 	version: string | *"latest"
 	prefix?: string
@@ -29,12 +37,24 @@ package states
 // (json/toml/yaml).
 #FileState: {
 	type:     "file"
-	name:     string
+	name?:    string
+	order:    int | *50
 	path:     string
 	mode:     int | *0o644
 	content?: string
 	data?: {...}
 	format?: "json" | "toml" | "yaml"
+}
+
+// #CopyState recursively copies a filesystem tree from src into dst at apply
+// time. Used for path-sourced skills/jobs (`files: "<path>"`). A relative src is
+// resolved against the chart directory by the Go layer.
+#CopyState: {
+	type:  "copy"
+	name?: string
+	order: int | *50
+	src:   string
+	dst:   string
 }
 
 // #EnvState manages one environment variable in a managed export file. target
@@ -43,7 +63,8 @@ package states
 // expand when sourced (e.g. PATH prepends: "<dir>:$PATH").
 #EnvState: {
 	type:    "env"
-	name:    string
+	name?:   string
+	order:   int | *60
 	value:   string
 	target?: string
 	expand?: bool
@@ -52,11 +73,12 @@ package states
 // #ShellState runs a command, optionally guarded for idempotency.
 #ShellState: {
 	type:     "shell"
-	name:     string
+	name?:    string
+	order:    int | *75
 	run:      string
 	creates?: string
 	unless?:  string
 }
 
-// #State is any basic state; used to type the top-level list.
-#State: #NpmState | #PnpmState | #FileState | #EnvState | #ShellState
+// #State is any basic state; used to type the top-level states map/list.
+#State: #NpmState | #PnpmState | #FileState | #CopyState | #EnvState | #ShellState

@@ -142,6 +142,8 @@ func handlerTypeOf(a Action) string {
 		return "pnpm"
 	case "write-file":
 		return "file"
+	case "copy-file":
+		return "copy"
 	case "set-env":
 		return "env"
 	case "run":

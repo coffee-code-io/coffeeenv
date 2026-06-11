@@ -1,67 +1,70 @@
-// Package pi renders the shared agent Context into pi.dev's layout under
+// Package pi renders the shared agent namespace into pi.dev's layout under
 // ~/.pi/agent: AGENTS.md, skills/<name>/SKILL.md, and mcp.json. pi.dev's exact
 // package name and config paths should be confirmed against the real CLI; the
 // ~/.pi/agent base matches the extension path coffeectx already targets
-// (~/.pi/agent/extensions/coffeectx.ts).
+// (~/.pi/agent/extensions/coffeectx.ts). #Pi is a mixin: embed it and write
+// `agent.*` data.
 package pi
 
 import (
 	"strings"
+	"list"
 	"coffeeenv.dev/lib/context"
-	"coffeeenv.dev/lib/agent"
+	ag "coffeeenv.dev/lib/agent"
 	st "coffeeenv.dev/lib/states"
 )
 
-// #Pi is an agent target: place it in a chart's targets list.
-#Pi: agent.#Target & {
-	// ctx is provided by agent.#Render; redeclared here so bare `ctx` references
-	// below resolve lexically within this conjunct.
-	ctx: agent.#Context
+// #Pi is the pi.dev agent target.
+#Pi: {
+	ag.#Base
+	agent: ag.#NS
+	agent: name: "pi"
 
-	version: string | *"latest"
+	_home:   context.root
+	_local:  context.engine == "local"
+	_mdKeys: list.SortStrings([for k, _ in agent.md {k}])
 
-	// Announce the active agent so agent-agnostic libraries can branch on it.
-	register: agent: "pi"
-
-	// _home is "~" (global) or the venv root (local).
-	_home:  context.root
-	_local: context.engine == "local"
-
-	states: [
-		st.#NpmState & {
-			name:    "pi-cli"
+	states: {
+		"pi-cli": st.#NpmState & {
 			package: "@pi-dev/cli"
-			version: version
+			version: agent.version
 			if _local {prefix: context.root}
-		},
-		if len(ctx.agentMd) > 0 {
-			st.#FileState & {
-				name:    "pi-agents"
+		}
+
+		if len(agent.md) > 0 {
+			"pi-agents": st.#FileState & {
 				path:    "\(_home)/.pi/agent/AGENTS.md"
-				content: strings.Join(ctx.agentMd, "\n\n")
+				content: strings.Join([for k in _mdKeys {agent.md[k]}], "\n\n")
 			}
-		},
-		for sname, sk in ctx.skills {
-			st.#FileState & {
-				name:    "pi-skill-\(sname)"
+		}
+
+		for sname, sk in agent.skills if sk.body != "" {
+			"pi-skill-\(sname)": st.#FileState & {
 				path:    "\(_home)/.pi/agent/skills/\(sname)/SKILL.md"
 				content: sk.body
 			}
-		},
-		for sname, sk in ctx.skills for fpath, fcontent in sk.files {
-			st.#FileState & {
-				name:    "pi-skill-\(sname)-file"
+		}
+		for sname, sk in agent.skills if (sk.files & string) != _|_ {
+			"pi-skill-\(sname)-files": st.#CopyState & {
+				src: sk.files
+				dst: "\(_home)/.pi/agent/skills/\(sname)"
+			}
+		}
+		for sname, sk in agent.skills if (sk.files & {[string]: string}) != _|_ for fpath, fcontent in sk.files {
+			"pi-skill-\(sname)-\(fpath)": st.#FileState & {
 				path:    "\(_home)/.pi/agent/skills/\(sname)/\(fpath)"
 				content: fcontent
 			}
-		},
-		if len(ctx.mcps) > 0 {
-			st.#FileState & {
-				name:   "pi-mcp"
+		}
+
+		// Emptiness via unification with a closed empty struct (not len): keeps the
+		// build from forcing an input a feature gates its MCP contribution on.
+		if (close({}) & agent.mcps) == _|_ {
+			"pi-mcp": st.#FileState & {
 				path:   "\(_home)/.pi/agent/mcp.json"
 				format: "json"
 				data: mcpServers: {
-					for mname, m in ctx.mcps {
+					for mname, m in agent.mcps {
 						(mname): {
 							if m.command != _|_ {command: m.command}
 							if m.args != _|_ {args: m.args}
@@ -71,13 +74,13 @@ import (
 					}
 				}
 			}
-		},
+		}
+
 		if _local {
-			st.#EnvState & {
-				name:   "PI_HOME"
+			"PI_HOME": st.#EnvState & {
 				value:  "\(context.root)/.pi"
 				target: "\(context.root)/env.sh"
 			}
-		},
-	]
+		}
+	}
 }
