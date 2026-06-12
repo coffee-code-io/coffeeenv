@@ -148,10 +148,10 @@ func ensureUserModule(overlay map[string]load.Source, venvAbs string) {
 }
 
 // decodeRawStates decodes the `states` field into a flat ordered RawState list.
-// Two shapes are accepted: a list (authored order is preserved) or a map keyed
-// by name (the new framework form), flattened sorted by (order, key). In the
-// map form the key is the state's name; in the list form `name` is read from the
-// element. `type` and `order` are stripped from the param bag.
+// The canonical shape is a map keyed by name (the map key IS the state's name),
+// flattened sorted by (order, key). A bare list is also accepted for low-level
+// charts, preserving authored order; such states are unnamed. `type` and `order`
+// are stripped from the param bag.
 func decodeRawStates(statesV cue.Value) ([]state.RawState, error) {
 	switch statesV.IncompleteKind() {
 	case cue.ListKind:
@@ -161,8 +161,7 @@ func decodeRawStates(statesV cue.Value) ([]state.RawState, error) {
 		}
 		out := make([]state.RawState, 0, len(maps))
 		for i, m := range maps {
-			name, _ := m["name"].(string)
-			rs, err := rawFromMap(m, name)
+			rs, err := rawFromMap(m, "")
 			if err != nil {
 				return nil, fmt.Errorf("states[%d]: %w", i, err)
 			}

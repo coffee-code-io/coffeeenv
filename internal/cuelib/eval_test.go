@@ -150,7 +150,7 @@ import (
 	st "coffeeenv.dev/lib/states"
 )
 _req: context.#Require & {engines: ["global"]}
-states: [st.#FileState & {name: "x", path: "/tmp/x", content: "y"}]
+states: {x: st.#FileState & {path: "/tmp/x", content: "y"}}
 `)
 	if _, err := EvalStates(dir, Opts{Engine: "global", Root: "~"}); err != nil {
 		t.Fatalf("global should be allowed: %v", err)

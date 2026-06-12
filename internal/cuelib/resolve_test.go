@@ -23,7 +23,7 @@ projects: [
 	{name: "a", lsp: string @input("lsp for a", order=1)},
 	{name: "b", lsp: string @input("lsp for b", order=2)},
 ]
-states: [for p in projects {st.#FileState & {name: p.name, path: "/tmp/\(p.name)", content: p.lsp}}]
+states: {for p in projects {(p.name): st.#FileState & {path: "/tmp/\(p.name)", content: p.lsp}}}
 `)
 
 	// Non-interactive: error lists both nested paths.
@@ -116,7 +116,7 @@ func TestResolveNonAnnotatedError(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "env.cue"), `package env
 import st "coffeeenv.dev/lib/states"
 mystery: string   // non-concrete, no @input
-states: [st.#FileState & {name: "x", path: "/tmp/x", content: mystery}]
+states: {x: st.#FileState & {path: "/tmp/x", content: mystery}}
 `)
 	_, err := Resolve(dir, Opts{Engine: "global", Root: "~"}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "mystery") {

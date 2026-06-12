@@ -11,10 +11,9 @@ verbose: bool   @input("Verbose? (true/false)", order=2)
 // derived: becomes concrete once the inputs are known.
 _msg: "region=\(region) verbose=\(verbose)"
 
-states: [
-	st.#FileState & {
-		name:    "cfg"
+states: {
+	cfg: st.#FileState & {
 		path:    "/tmp/coffeeenv-demo/\(region).txt"
 		content: _msg + "\n"
-	},
-]
+	}
+}
