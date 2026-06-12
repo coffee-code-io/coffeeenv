@@ -45,8 +45,8 @@ _explain: """
 
 // #Project describes one coffeectx project. The map key is the project name;
 // every field carries @input and is prompted per project. `language` selects the
-// LSP server from the lsp catalog; `skills`/`jobs` are comma-separated enable
-// lists.
+// LSP server from the lsp.available registry; `skills`/`jobs` are comma-separated
+// enable lists.
 #Project: {
 	repoPath: string @input("Repo path", order=1)
 	language: string @input("Language for the LSP job (empty for none)", order=2)
@@ -54,12 +54,11 @@ _explain: """
 	jobs:     string @input("Jobs to enable, comma-separated (empty for none)", order=4)
 }
 
-// #McpNS is the minimal `coffeectx` namespace used by #Mcp: just the install
-// confirmation and any registered jobs. The full #CtxNS embeds it, so a chart
-// that only installs the MCP integration is prompted for `confirm` alone, while
-// #Setup adds the auth/model/project configuration below.
+// #McpNS is the minimal `coffeectx` namespace used by #Mcp: just any registered
+// jobs. Embedding #Mcp / #Setup is itself the opt-in — there is no confirmation
+// prompt in the library (a chart that wants one adds it in its own env.cue). The
+// full #CtxNS embeds this, so #Setup adds the auth/model/project config below.
 #McpNS: {
-	confirm: bool @input("Install coffeectx for this agent? (true/false)", order=1)
 	jobs: {[string]: #Job}
 }
 
@@ -72,20 +71,47 @@ _explain: """
 #CtxNS: {
 	#McpNS
 
-	authType: "apiKey" | "openai-oauth" @input("Auth type (apiKey/openai-oauth)", order=2)
-	url:      string @input("API base URL (OpenAI-compatible endpoint)", order=3)
+	authType: "apiKey" | "openai-oauth" @input("Auth type (apiKey/openai-oauth)", order=1)
+
+	// Main credential (UI agent + jobs). AuthSettings carries provider XOR url:
+	// provider wins, so url is only prompted when provider is left empty. In
+	// oauth mode pi.dev holds the credential, so all three are forced empty.
+	provider: string @input("Provider alias openai/anthropic/openrouter (empty for custom url)", order=2)
+	url:      string @input("Custom API base URL", order=3)
 	apiKey:   string @input("API key", order=4)
+	if provider != "" {
+		url: ""
+	}
 	if authType == "openai-oauth" {
-		url:    ""
-		apiKey: ""
+		provider: ""
+		url:      ""
+		apiKey:   ""
 	}
 
-	embeddingsModel: string @input("Embeddings model", order=5)
-	indexerModel:    string @input("Indexer (job agent) model", order=6)
-	uiModel:         string @input("UI agent model", order=7)
+	// Embeddings credential — always apiKey, since openai-oauth can't embed. In
+	// apiKey mode it reuses the main credential (pinned, never prompted); in oauth
+	// mode it is prompted separately.
+	embedProvider: string @input("Embeddings provider alias (empty for custom url)", order=5)
+	embedUrl:      string @input("Embeddings custom API base URL", order=6)
+	embedApiKey:   string @input("Embeddings API key", order=7)
+	if embedProvider != "" {
+		embedUrl: ""
+	}
+	if authType == "apiKey" {
+		embedProvider: provider
+		embedUrl:      url
+		embedApiKey:   apiKey
+	}
+
+	embeddingsModel: string @input("Embeddings model", order=8)
+	indexerModel:    string @input("Indexer (job agent) model", order=9)
+	uiModel:         string @input("UI agent model", order=10)
+
+	// The default project for the CLI (CoffeectxConfig.active). Empty = unset.
+	active: string @input("Active project name (empty for none)", order=11)
 
 	if context.engine == "global" {
-		autolaunch: bool @input("Auto-launch the coffeectx daemon on login? (true/false)", order=8)
+		autolaunch: bool @input("Auto-launch the coffeectx daemon on login? (true/false)", order=12)
 	}
 	if context.engine != "global" {
 		autolaunch: false
@@ -95,9 +121,11 @@ _explain: """
 }
 
 // #Mcp installs coffeectx for the active agent and feeds the agent namespace.
-// `coffeectx.confirm` gates the integration; for pi it installs the pi.dev
-// extension, otherwise it registers the MCP server (by writing
-// agent.mcps.coffeectx, which the agent target renders).
+// The indexer (the daemon/CLI) is always installed. The integration is driven by
+// the active agent (agent.name): for "pi" we install the pi.dev plugin +
+// extension; otherwise we install the MCP server package (@coffeectx/server,
+// which provides the `coffeectx-mcp` binary) and register agent.mcps.coffeectx,
+// which the agent target renders.
 #Mcp: {
 	coffeectx: #McpNS
 	agent: ag.#NS
@@ -108,30 +136,40 @@ _explain: """
 	_version: string | *"latest"
 
 	// Feed the agent namespace: the explanation is always added; the MCP server
-	// is registered for non-pi agents when confirmed. The confirm-gated entry
-	// lives inside the agent.mcps value (the field it contributes to). Chained
-	// `if` (not `&&`) because `&&` hard-errors on a non-concrete operand.
+	// is registered for non-pi agents (the entry lives inside the agent.mcps
+	// value, the field it contributes to). agent.name is concrete, so no gating
+	// on an unresolved input here.
 	agent: md: coffeectx: _explain
 	agent: mcps: {
-		if coffeectx.confirm if agent.name != "pi" {
+		if agent.name != "pi" {
 			coffeectx: {command: "coffeectx-mcp"}
 		}
 	}
 
 	states: {
-		"coffeectx-server": st.#NpmState & {
-			package: "@coffeectx/server"
+		// The indexer (daemon + `coffeectx` CLI) is always installed.
+		"coffeectx-indexer": st.#NpmState & {
+			package: "@coffeectx/indexer"
 			version: _version
 			if _local {prefix: context.root}
 		}
-		if coffeectx.confirm if agent.name == "pi" {
+		// The MCP server package — only for non-pi agents.
+		if agent.name != "pi" {
+			"coffeectx-server": st.#NpmState & {
+				package: "@coffeectx/server"
+				version: _version
+				if _local {prefix: context.root}
+			}
+		}
+		// The pi.dev plugin + extension — only for the pi agent.
+		if agent.name == "pi" {
 			"coffeectx-pi-plugin": st.#NpmState & {
 				package: "@coffeectx/pi-plugin"
 				version: _version
 				if _local {prefix: context.root}
 			}
 		}
-		if coffeectx.confirm if agent.name == "pi" {
+		if agent.name == "pi" {
 			"coffeectx-pi-ext": st.#FileState & {
 				path:    "\(_home)/.pi/agent/extensions/coffeectx.ts"
 				content: "export { default } from '@coffeectx/pi-plugin';\n"
@@ -149,17 +187,35 @@ _explain: """
 	coffeectx: #CtxNS
 	agent: ag.#NS
 
+	// Require the in-built language servers, and install only the ones the
+	// projects use. The user can register more via `lsp: available: <lang>: {…}`.
+	lsplib.#Setup
+	lsplib.#InstallLsp & {languages: _langs}
+	lsp: lsplib.#LspNS
+	_langs: [for k, p in coffeectx.projects if p.language != "" {p.language}]
+	// Alias the registry to a name the config's `jobs.lsp` field can't shadow.
+	_lspAvail: lsp.available
+
 	_local: context.engine == "local"
 	_home:  context.root
 
-	// _authCommon is the shared credential reused by every auth block; each block
-	// adds its own model. In openai-oauth mode only authType is carried.
-	_authCommon: {
+	// Two AuthSettings builders (retrival-mcp packages/core/src/auth.ts): provider
+	// XOR url, each block adding its own model. _mainAuth drives the UI agent and
+	// jobs (openai-oauth carries only authType); _embedAuth is always apiKey since
+	// oauth can't embed, reusing the main credential in apiKey mode.
+	_mainAuth: {
 		authType: coffeectx.authType
 		if coffeectx.authType == "apiKey" {
-			url:    coffeectx.url
+			if coffeectx.provider != "" {provider: coffeectx.provider}
+			if coffeectx.provider == "" {url: coffeectx.url}
 			apiKey: coffeectx.apiKey
 		}
+	}
+	_embedAuth: {
+		authType: "apiKey"
+		if coffeectx.embedProvider != "" {provider: coffeectx.embedProvider}
+		if coffeectx.embedProvider == "" {url: coffeectx.embedUrl}
+		apiKey: coffeectx.embedApiKey
 	}
 
 	// <_home>/.coffeecode/config.yaml mirrored from CoffeectxConfig (retrival-mcp
@@ -167,6 +223,9 @@ _explain: """
 	// zero-project case is a concrete `{}` rather than an empty comprehension
 	// (which CUE otherwise carries as incomplete once embedded in `data`).
 	_config: {
+		if coffeectx.active != "" {
+			active: coffeectx.active
+		}
 		projects: {
 			{}
 			for k, p in coffeectx.projects {
@@ -174,18 +233,18 @@ _explain: """
 					db:       "\(_home)/.coffeecode/db/\(k).db"
 					repoPath: p.repoPath
 					enabled:  true
-					core: embed: auth: _authCommon & {model: coffeectx.embeddingsModel}
-					agent: auth: _authCommon & {model:       coffeectx.uiModel}
+					core: embed: auth: _embedAuth & {model: coffeectx.embeddingsModel}
+					agent: auth: _mainAuth & {model:        coffeectx.uiModel}
 					mcp: tools: {search: true, exact: true, regex: true, raw_query: true, load_node: true, insert: false}
 					if p.language != "" {
-						jobs: lsp: {enabled: true, parameters: {lspCommand: lsplib.catalog[p.language].command}}
+						jobs: lsp: {enabled: true, parameters: {lspCommand: _lspAvail[p.language].command}}
 					}
 					if p.skills != "" {
 						skills: jobs: include: strings.Split(p.skills, ",")
 					}
 					if p.jobs != "" {
 						for jn in strings.Split(p.jobs, ",") {
-							jobs: (jn): {enabled: true, parameters: {auth: _authCommon & {model: coffeectx.indexerModel}}}
+							jobs: (jn): {enabled: true, parameters: {auth: _mainAuth & {model: coffeectx.indexerModel}}}
 						}
 					}
 				}

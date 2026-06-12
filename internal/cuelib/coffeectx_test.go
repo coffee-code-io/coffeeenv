@@ -5,19 +5,21 @@ import (
 	"testing"
 )
 
-// TestCoffeectxInstall: with confirm=true the module installs @coffeectx/server,
-// registers the MCP server (non-pi agent), and adds the CoffeeCtx paragraph (via
-// the Claude renderer).
+// TestCoffeectxInstall: embedding coffeectx.#Mcp (no confirmation) always
+// installs the indexer, installs @coffeectx/server and registers the MCP server
+// for the non-pi Claude agent, and adds the CoffeeCtx paragraph.
 func TestCoffeectxInstall(t *testing.T) {
-	given := map[string]string{"coffeectx.confirm": "true"}
-	r, err := Resolve(exampleDir("claude-coffeectx"), Opts{Engine: "global", Root: "~"}, given, nil)
+	r, err := Resolve(exampleDir("claude-coffeectx"), Opts{Engine: "global", Root: "~"}, nil, nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	raws := r.States
 	m := byName(raws)
+	if _, ok := m["coffeectx-indexer"]; !ok {
+		t.Errorf("indexer should always be installed; got %v", names(raws))
+	}
 	if _, ok := m["coffeectx-server"]; !ok {
-		t.Errorf("missing @coffeectx/server npm state; got %v", names(raws))
+		t.Errorf("missing @coffeectx/server npm state (non-pi agent); got %v", names(raws))
 	}
 	md, ok := m["claude-claudemd"]
 	if !ok {
@@ -45,13 +47,14 @@ func TestCoffeectxSetup(t *testing.T) {
 		"coffeectx.projects.myrepo.language": "typescript",
 		"coffeectx.projects.myrepo.skills":   "api,contract",
 		"coffeectx.projects.myrepo.jobs":     "reindex",
-		"coffeectx.confirm":                  "true",
 		"coffeectx.authType":                 "apiKey",
+		"coffeectx.provider":                 "", // empty -> custom url path
 		"coffeectx.url":                      "https://api.example.com",
 		"coffeectx.apiKey":                   "sk-test",
 		"coffeectx.embeddingsModel":          "embed-1",
 		"coffeectx.indexerModel":             "index-1",
 		"coffeectx.uiModel":                  "ui-1",
+		"coffeectx.active":                   "myrepo",
 		"coffeectx.autolaunch":               "true",
 	}
 	r, err := Resolve(exampleDir("coffeectx-setup"), Opts{Engine: "global", Root: "~", OS: "darwin"}, given, nil)
@@ -78,6 +81,21 @@ func TestCoffeectxSetup(t *testing.T) {
 	}
 	if got, _ := myrepo["repoPath"].(string); got != "/home/me/repo" {
 		t.Errorf("config repoPath = %v", got)
+	}
+	if got, _ := data["active"].(string); got != "myrepo" {
+		t.Errorf("config active = %v, want myrepo", got)
+	}
+
+	// The project's language resolves to the lsp command (from lsp.available) and
+	// the server is installed for that language.
+	jobsCfg, _ := myrepo["jobs"].(map[string]any)
+	lspJob, _ := jobsCfg["lsp"].(map[string]any)
+	lspParams, _ := lspJob["parameters"].(map[string]any)
+	if got, _ := lspParams["lspCommand"].(string); got != "typescript-language-server --stdio" {
+		t.Errorf("lspCommand = %v", got)
+	}
+	if _, ok := m["lsp-install-typescript"]; !ok {
+		t.Errorf("missing lsp-install-typescript state; got %v", names(r.States))
 	}
 
 	// Embedding auth: an AuthSettings block under core.embed.auth with the

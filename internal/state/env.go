@@ -61,8 +61,12 @@ func (envHandler) Decode(rs RawState) (Desired, error) {
 	if err := decodeParams(rs, &p); err != nil {
 		return nil, err
 	}
+	// The variable name is the state's name — i.e. the states-map key.
 	if p.Name == "" {
-		return nil, errors.New("env: name is required")
+		p.Name = rs.Name
+	}
+	if p.Name == "" {
+		return nil, errors.New("env: name is required (use the states-map key)")
 	}
 	return &p, nil
 }
