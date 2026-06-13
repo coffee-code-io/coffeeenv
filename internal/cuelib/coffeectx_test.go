@@ -86,6 +86,12 @@ func TestCoffeectxSetup(t *testing.T) {
 		t.Errorf("config active = %v, want myrepo", got)
 	}
 
+	// The @multichoice skills value "api,contract" is injected as a CUE list.
+	skillsInc, _ := myrepo["skills"].(map[string]any)["jobs"].(map[string]any)["include"].([]any)
+	if len(skillsInc) != 2 || skillsInc[0] != "api" || skillsInc[1] != "contract" {
+		t.Errorf("skills include = %#v, want [api contract] list", skillsInc)
+	}
+
 	// The project's language resolves to the lsp command (from lsp.available) and
 	// the server is installed for that language.
 	jobsCfg, _ := myrepo["jobs"].(map[string]any)

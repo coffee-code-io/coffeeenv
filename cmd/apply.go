@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -109,34 +107,10 @@ func recordManifest(v venv.Venv, t target, values map[string]string) error {
 	})
 }
 
-// interactivePrompt asks the user for an input value on stdin.
-func interactivePrompt(in cuelib.Input) (string, error) {
-	fmt.Printf("%s ", in.Prompt)
-	sc := bufio.NewScanner(os.Stdin)
-	if !sc.Scan() {
-		if err := sc.Err(); err != nil {
-			return "", err
-		}
-		return "", fmt.Errorf("no input provided for %q", in.Name)
-	}
-	return strings.TrimSpace(sc.Text()), nil
-}
-
 // stdinIsTTY reports whether stdin is an interactive terminal.
 func stdinIsTTY() bool {
 	fi, err := os.Stdin.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
-}
-
-// confirm prompts for a y/N answer on stdin.
-func confirm(prompt string) (bool, error) {
-	fmt.Printf("%s [y/N] ", prompt)
-	sc := bufio.NewScanner(os.Stdin)
-	if !sc.Scan() {
-		return false, sc.Err()
-	}
-	ans := strings.ToLower(strings.TrimSpace(sc.Text()))
-	return ans == "y" || ans == "yes", nil
 }
 
 // printEnvHintIfNeeded reminds the user how to load env vars that were set.

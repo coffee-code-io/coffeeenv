@@ -14,7 +14,6 @@
 package coffeectx
 
 import (
-	"strings"
 	"coffeeenv.dev/lib/context"
 	ag "coffeeenv.dev/lib/agent"
 	// Aliased: the generated config has a `jobs.lsp` field that would otherwise
@@ -50,8 +49,9 @@ _explain: """
 #Project: {
 	repoPath: string @input("Repo path", order=1)
 	language: string @input("Language for the LSP job (empty for none)", order=2)
-	skills:   string @input("Skills to enable, comma-separated (empty for none)", order=3)
-	jobs:     string @input("Jobs to enable, comma-separated (empty for none)", order=4)
+	// Multi-select from the registered skills/jobs (agent.skills / coffeectx.jobs).
+	skills: [...string] @multichoice("Enable skills", from=agent.skills, order=3)
+	jobs: [...string] @multichoice("Enable jobs", from=coffeectx.jobs, order=4)
 }
 
 // #McpNS is the minimal `coffeectx` namespace used by #Mcp: just any registered
@@ -71,7 +71,7 @@ _explain: """
 #CtxNS: {
 	#McpNS
 
-	authType: "apiKey" | "openai-oauth" @input("Auth type (apiKey/openai-oauth)", order=1)
+	authType: "apiKey" | "openai-oauth" @choose("Auth type", order=1)
 
 	// Main credential (UI agent + jobs). AuthSettings carries provider XOR url:
 	// provider wins, so url is only prompted when provider is left empty. In
@@ -107,17 +107,18 @@ _explain: """
 	indexerModel:    string @input("Indexer (job agent) model", order=9)
 	uiModel:         string @input("UI agent model", order=10)
 
-	// The default project for the CLI (CoffeectxConfig.active). Empty = unset.
-	active: string @input("Active project name (empty for none)", order=11)
-
 	if context.engine == "global" {
-		autolaunch: bool @input("Auto-launch the coffeectx daemon on login? (true/false)", order=12)
+		autolaunch: bool @input("Auto-launch the coffeectx daemon on login? (true/false)", order=11)
 	}
 	if context.engine != "global" {
 		autolaunch: false
 	}
 
-	projects: {[string]: #Project} @inputMap("Project name")
+	// Projects are entered first (order=12); the active project is then chosen
+	// from the entered keys (order=13). CoffeectxConfig.active; empty = unset
+	// (e.g. when no projects were entered).
+	projects: {[string]: #Project} @inputMap("Project name", order=12)
+	active:   string @choose("Active project", from=coffeectx.projects, order=13)
 }
 
 // #Mcp installs coffeectx for the active agent and feeds the agent namespace.
@@ -239,13 +240,11 @@ _explain: """
 					if p.language != "" {
 						jobs: lsp: {enabled: true, parameters: {lspCommand: _lspAvail[p.language].command}}
 					}
-					if p.skills != "" {
-						skills: jobs: include: strings.Split(p.skills, ",")
+					if len(p.skills) > 0 {
+						skills: jobs: include: p.skills
 					}
-					if p.jobs != "" {
-						for jn in strings.Split(p.jobs, ",") {
-							jobs: (jn): {enabled: true, parameters: {auth: _mainAuth & {model: coffeectx.indexerModel}}}
-						}
+					for jn in p.jobs {
+						jobs: (jn): {enabled: true, parameters: {auth: _mainAuth & {model: coffeectx.indexerModel}}}
 					}
 				}
 			}

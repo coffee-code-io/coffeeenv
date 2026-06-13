@@ -5,9 +5,21 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/coffee-code-io/coffeeenv/internal/state"
+)
+
+// Plan-preview palette. color auto-disables when stdout is not a TTY or NO_COLOR
+// is set, so the output is plain when piped.
+var (
+	cInstall = color.New(color.FgGreen)
+	cWrite   = color.New(color.FgYellow)
+	cRun     = color.New(color.FgCyan)
+	cName    = color.New(color.Bold)
+	cDim     = color.New(color.Faint)
+	cSummary = color.New(color.Bold)
 )
 
 var (
@@ -64,27 +76,31 @@ func firstArg(args []string) string {
 	return ""
 }
 
-// printPlan renders a terraform-style summary of the plan.
+// printPlan renders a terraform-style summary of the plan, colored on a TTY.
 func printPlan(p state.Plan) {
 	for _, a := range p.Actions {
-		fmt.Printf("  %s %-12s %s\n", marker(a.Kind), a.StateName, a.Summary)
+		sigil, c := marker(a.Kind)
+		fmt.Printf("  %s %s %s\n",
+			c.Sprint(sigil),
+			cName.Sprintf("%-12s", a.StateName),
+			cDim.Sprint(a.Summary))
 	}
 	if len(p.Actions) == 0 {
 		fmt.Printf("No changes. %d state(s) already up to date.\n", p.Unchanged)
 		return
 	}
-	fmt.Printf("\nPlan: %d to change, %d unchanged.\n", len(p.Actions), p.Unchanged)
+	fmt.Printf("\n%s\n", cSummary.Sprintf("Plan: %d to change, %d unchanged.", len(p.Actions), p.Unchanged))
 }
 
-// marker maps an action kind to a leading sigil for plan output.
-func marker(kind string) string {
+// marker maps an action kind to a leading sigil and its color for plan output.
+func marker(kind string) (string, *color.Color) {
 	switch kind {
 	case "write-file", "set-env":
-		return "~"
+		return "~", cWrite
 	case "run":
-		return ">"
-	default: // installs
-		return "+"
+		return ">", cRun
+	default: // installs / copies
+		return "+", cInstall
 	}
 }
 
