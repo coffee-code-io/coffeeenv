@@ -106,7 +106,17 @@ func (envHandler) Apply(_ context.Context, a Action) error {
 		return err
 	}
 	vars[d.Name] = envVar{Value: d.Value, Expand: d.Expand}
-	return writeActivate(d.file(), vars)
+	if err := writeActivate(d.file(), vars); err != nil {
+		return err
+	}
+	// Also set it in this process so later actions in the same apply (e.g. shell
+	// commands, which run as child processes) see it. `expand` values reference
+	// the live shell env ($PATH etc.), so expand them against the current env.
+	val := d.Value
+	if d.Expand {
+		val = os.ExpandEnv(val)
+	}
+	return os.Setenv(d.Name, val)
 }
 
 // --- managed activate.sh helpers ---
