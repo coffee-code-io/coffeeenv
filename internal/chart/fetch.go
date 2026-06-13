@@ -11,43 +11,83 @@ import (
 	"github.com/coffee-code-io/coffeeenv/internal/sys"
 )
 
-// Pull fetches the environment definition at source (a local directory or a
-// git+https URL) into the chart directory, wiping any previous contents. It
-// returns the ref/commit for the lock file (empty for local sources).
-func (c Chart) Pull(ctx context.Context, source string) (ref, commit string, err error) {
+// Pull fetches the environment definition at source into the chart directory,
+// wiping any previous contents. Supported transports are dispatched by scheme:
+//
+//	git+https:// | git+ssh:// | git@… | *.git   -> git clone (with #ref:subpath)
+//	oci://<ref>                                  -> `oras pull` (shell-out)
+//	local://<path> | <existing local dir>        -> copy a local directory
+//
+// It returns ref/commit (git) and digest (oci) for the lock file.
+func (c Chart) Pull(ctx context.Context, source string) (ref, commit, digest string, err error) {
 	var srcDir string
-	var cleanup func()
+	cleanup := func() {}
 
-	if isGitSource(source) {
+	switch {
+	case isOCISource(source):
+		srcDir, digest, cleanup, err = fetchOCI(ctx, source)
+	case isGitSource(source):
 		srcDir, ref, commit, cleanup, err = fetchGit(ctx, source)
-		if err != nil {
-			return "", "", err
-		}
-		defer cleanup()
-	} else {
-		srcDir, err = filepath.Abs(source)
-		if err != nil {
-			return "", "", err
-		}
-		if fi, statErr := os.Stat(srcDir); statErr != nil || !fi.IsDir() {
-			return "", "", fmt.Errorf("source %q is not a directory", source)
-		}
+	default:
+		srcDir, err = localDir(source)
 	}
+	if err != nil {
+		return "", "", "", err
+	}
+	defer cleanup()
 
-	if !hasCueFile(srcDir) {
-		return "", "", fmt.Errorf("source %q contains no .cue files", source)
+	if !hasCueFile(srcDir) && !hasManifest(srcDir) {
+		return "", "", "", fmt.Errorf("source %q has no .cue files or manifest.json", source)
 	}
 
 	if err := os.RemoveAll(c.Dir); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if err := copyTree(srcDir, c.Dir); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if err := c.ensureModule(); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return ref, commit, nil
+	return ref, commit, digest, nil
+}
+
+// localDir resolves a local source: a bare path or a local://<path> URL.
+// local:///abs is absolute; local://./rel and local://rel resolve against cwd.
+func localDir(source string) (string, error) {
+	p := strings.TrimPrefix(source, "local://")
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	if fi, statErr := os.Stat(abs); statErr != nil || !fi.IsDir() {
+		return "", fmt.Errorf("source %q is not a directory", source)
+	}
+	return abs, nil
+}
+
+func isOCISource(s string) bool { return strings.HasPrefix(s, "oci://") }
+
+// fetchOCI pulls an OCI artifact into a temp dir by shelling out to `oras`.
+func fetchOCI(ctx context.Context, source string) (dir, digest string, cleanup func(), err error) {
+	ref := strings.TrimPrefix(source, "oci://")
+	if !sys.Look("oras") {
+		return "", "", func() {}, fmt.Errorf("oci:// requires `oras` on PATH (https://oras.land); cannot pull %q", source)
+	}
+	tmp, err := os.MkdirTemp("", "coffeeenv-oci-*")
+	if err != nil {
+		return "", "", func() {}, err
+	}
+	cleanup = func() { os.RemoveAll(tmp) }
+	if pullErr := sys.Stream(ctx, "oras", "pull", ref, "--output", tmp); pullErr != nil {
+		cleanup()
+		return "", "", func() {}, fmt.Errorf("oras pull: %w", pullErr)
+	}
+	// Best-effort digest for the lock file.
+	if res, rerr := sys.Run(ctx, "oras", "resolve", ref); rerr == nil {
+		digest = strings.TrimSpace(res.Stdout)
+	}
+	return tmp, digest, cleanup, nil
 }
 
 // ensureModule writes cue.mod/module.cue if the pulled source didn't ship one.
@@ -136,6 +176,13 @@ func hasCueFile(dir string) bool {
 }
 
 func excluded(name string) bool { return name == ".git" || name == "node_modules" }
+
+// hasManifest reports whether dir holds a manifest.json (an exec-only meta-chart
+// may carry no .cue files).
+func hasManifest(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "manifest.json"))
+	return err == nil
+}
 
 // copyTree recursively copies src into dst, preserving file modes and skipping
 // excluded directories.

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -62,11 +63,11 @@ var venvListCmd = &cobra.Command{
 		}
 		for _, n := range names {
 			v, _ := venv.Open(n)
-			chart := "(empty)"
-			if m, err := v.ReadManifest(); err == nil && m.Chart != "" {
-				chart = m.Chart
+			execs := "(empty)"
+			if m, err := v.ReadManifest(); err == nil && len(m.Execs) > 0 {
+				execs = strings.Join(m.Execs, ", ")
 			}
-			fmt.Printf("  %-20s %s\n", n, chart)
+			fmt.Printf("  %-20s %s\n", n, execs)
 		}
 		return nil
 	},

@@ -73,6 +73,7 @@ type LockInfo struct {
 	Source   string `json:"source"`
 	Ref      string `json:"ref,omitempty"`
 	Commit   string `json:"commit,omitempty"`
+	Digest   string `json:"digest,omitempty"` // oci:// artifact digest
 	PulledAt string `json:"pulledAt"`
 }
 

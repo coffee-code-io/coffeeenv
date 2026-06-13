@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,7 @@ Examples:
 			return err
 		}
 
-		ref, commit, err := c.Pull(cmd.Context(), source)
+		ref, commit, digest, err := c.Pull(cmd.Context(), source)
 		if err != nil {
 			return err
 		}
@@ -42,6 +43,7 @@ Examples:
 			Source:   source,
 			Ref:      ref,
 			Commit:   commit,
+			Digest:   digest,
 			PulledAt: time.Now().UTC().Format(time.RFC3339),
 		}); err != nil {
 			return err
@@ -51,9 +53,59 @@ Examples:
 		if commit != "" {
 			fmt.Printf("  commit %s\n", commit)
 		}
+
+		// Recursively pull the chart's declared dependencies (BFS, deduped).
+		if n, err := pullDeps(cmd.Context(), c); err != nil {
+			return err
+		} else if n > 0 {
+			fmt.Printf("  pulled %d dependenc(ies)\n", n)
+		}
+
 		fmt.Printf("Next: coffeeenv plan %s\n", name)
 		return nil
 	},
+}
+
+// pullDeps fetches the transitive `dependencies` of root, breadth-first,
+// deduping by source. Returns how many new charts were pulled.
+func pullDeps(ctx context.Context, root chart.Chart) (int, error) {
+	seen := map[string]bool{}
+	queue := []chart.Chart{root}
+	pulled := 0
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		m, ok, err := cur.ReadManifest()
+		if err != nil {
+			return pulled, err
+		}
+		if !ok {
+			continue
+		}
+		for _, src := range m.Dependencies {
+			if seen[src] {
+				continue
+			}
+			seen[src] = true
+			dc, err := chart.Open(chartNameFromSource(src))
+			if err != nil {
+				return pulled, err
+			}
+			if !dc.Exists() {
+				ref, commit, digest, err := dc.Pull(ctx, src)
+				if err != nil {
+					return pulled, fmt.Errorf("dependency %q: %w", src, err)
+				}
+				if err := dc.WriteLock(chart.LockInfo{Source: src, Ref: ref, Commit: commit, Digest: digest,
+					PulledAt: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+					return pulled, err
+				}
+				pulled++
+			}
+			queue = append(queue, dc)
+		}
+	}
+	return pulled, nil
 }
 
 func init() {

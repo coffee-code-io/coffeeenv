@@ -1,0 +1,4 @@
+{
+  "module": "coffeeenv.dev/examples/claude-coffeectx",
+  "type": "executable"
+}

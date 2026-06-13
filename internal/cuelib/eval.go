@@ -26,9 +26,10 @@ const userModule = "coffeeenv.dev/user"
 
 // Opts carries the engine context injected into CUE.
 type Opts struct {
-	Engine string // "global" | "local"
-	Root   string // "~" for global; the venv dir for local
-	OS     string // host GOOS ("darwin", "linux", ...); empty defaults to runtime.GOOS
+	Engine string            // "global" | "local"
+	Root   string            // "~" for global; the venv dir for local
+	OS     string            // host GOOS ("darwin", "linux", ...); empty defaults to runtime.GOOS
+	Deps   map[string]string // module path -> chart dir; mounted so `import "<module>"` resolves
 }
 
 // buildBase loads the chart's *.cue from chartDir, overlays the embedded library
@@ -46,6 +47,9 @@ func buildBase(chartDir string, opts Opts, extra map[string]string) (*cue.Contex
 	overlay := map[string]load.Source{}
 	if err := mountEmbed(overlay, venvAbs); err != nil {
 		return nil, cue.Value{}, "", fmt.Errorf("mount cue library: %w", err)
+	}
+	if err := mountDeps(overlay, venvAbs, opts.Deps); err != nil {
+		return nil, cue.Value{}, "", fmt.Errorf("mount deps: %w", err)
 	}
 	ensureUserModule(overlay, venvAbs)
 	injectContext(overlay, venvAbs, opts)
@@ -112,6 +116,48 @@ func mountEmbed(overlay map[string]load.Source, venvAbs string) error {
 		return nil
 	})
 }
+
+// mountDeps overlays each dependency chart's files under
+// <venv>/cue.mod/pkg/<module>/… so the composition can `import "<module>"`. A
+// dep's own cue.mod/ and excluded dirs (.git, node_modules) are skipped; they
+// share the composition's cue.mod/pkg tree, so a dep importing another dep (or
+// the embedded lib) resolves.
+func mountDeps(overlay map[string]load.Source, venvAbs string, deps map[string]string) error {
+	for module, dir := range deps {
+		pkgRoot := filepath.Join(venvAbs, "cue.mod", "pkg", filepath.FromSlash(module))
+		root := dir
+		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if p != root && (d.Name() == "cue.mod" || excludedDir(d.Name())) {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(d.Name(), ".cue") {
+				return nil
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			overlay[filepath.Join(pkgRoot, filepath.FromSlash(rel))] = load.FromBytes(data)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func excludedDir(name string) bool { return name == ".git" || name == "node_modules" }
 
 // injectContext overlays a concrete context/_inject.cue into the mounted
 // library so library helpers see the active engine/root. This unifies with the

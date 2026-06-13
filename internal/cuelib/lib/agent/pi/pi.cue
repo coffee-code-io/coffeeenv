@@ -10,13 +10,14 @@ import (
 	"strings"
 	"list"
 	"coffeeenv.dev/lib/context"
+	core "coffeeenv.dev/lib/core"
 	ag "coffeeenv.dev/lib/agent"
 	st "coffeeenv.dev/lib/states"
 )
 
 // #Pi is the pi.dev agent target.
-#Pi: {
-	ag.#Base
+#Main: {
+	core.#Main
 	agent: ag.#NS
 	agent: name: "pi"
 

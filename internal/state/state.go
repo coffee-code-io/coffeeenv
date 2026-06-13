@@ -140,6 +140,12 @@ func handlerTypeOf(a Action) string {
 		return "npm"
 	case "install-pnpm":
 		return "pnpm"
+	case "install-go":
+		return "go"
+	case "install-cargo":
+		return "cargo"
+	case "install-pip":
+		return "pip"
 	case "write-file":
 		return "file"
 	case "copy-file":

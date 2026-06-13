@@ -29,6 +29,39 @@ package states
 	prefix?: string
 }
 
+// #GoState installs a Go binary (`go install package@version`). With prefix
+// empty it uses the default GOBIN; with prefix set the binary lands in
+// <prefix>/bin (the venv). `bin` is the produced binary name (defaults to the
+// last path segment) used for an idempotency check.
+#GoState: {
+	type:    "go"
+	order:   int | *25
+	package: string
+	version: string | *"latest"
+	prefix?: string
+	bin?:    string
+}
+
+// #CargoState installs a crate (`cargo install`). prefix -> `--root <prefix>`
+// (binary in <prefix>/bin); empty installs into the default cargo root.
+#CargoState: {
+	type:    "cargo"
+	order:   int | *25
+	package: string
+	version: string | *"latest"
+	prefix?: string
+}
+
+// #PipState installs a Python package (`pip install`). prefix -> `--prefix
+// <prefix>`; empty installs into the active/default environment.
+#PipState: {
+	type:    "pip"
+	order:   int | *25
+	package: string
+	version: string | *"latest"
+	prefix?: string
+}
+
 // #FileState writes a file with exact content and mode. path may use ~ and
 // ${VAR}, expanded by the Go layer. Content is either a literal `content`
 // string, or a structured `data` subtree rendered by the Go layer in `format`
@@ -75,4 +108,4 @@ package states
 }
 
 // #State is any basic state; used to type the top-level states map.
-#State: #NpmState | #PnpmState | #FileState | #CopyState | #EnvState | #ShellState
+#State: #NpmState | #PnpmState | #GoState | #CargoState | #PipState | #FileState | #CopyState | #EnvState | #ShellState

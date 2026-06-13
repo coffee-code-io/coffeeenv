@@ -157,7 +157,7 @@ func TestLspRegistry(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "env.cue"), `package env
 import lsplib "coffeeenv.dev/lib/lsp"
 lsplib.#Setup
-lsplib.#InstallLsp & {languages: ["go", "custom"]}
+lsplib.#Main & {languages: ["go", "custom"]}
 lsp: available: custom: {command: "customls", installState: {type: "shell", run: "install-custom"}}
 `)
 	raws, err := EvalStates(dir, Opts{Engine: "global", Root: "~"})
@@ -202,7 +202,7 @@ func TestSkillFilesCopy(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "env.cue"), `package env
 import "coffeeenv.dev/lib/agent/claude"
-claude.#Claude
+claude.#Main
 agent: skills: docs: {files: "./skilldir"}
 `)
 	if err := os.MkdirAll(filepath.Join(dir, "skilldir"), 0o755); err != nil {

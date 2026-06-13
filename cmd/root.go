@@ -39,20 +39,21 @@ func init() {
 	rootCmd.AddCommand(pullCmd, planCmd, applyCmd, venvCmd)
 }
 
-// target is a resolved plan/apply destination: which chart to evaluate, with
-// what engine context, and (for --venv) which venv to record a manifest into.
+// target is a resolved plan/apply destination: the composition manifest (its
+// accumulated execs + values), the engine context, and how to persist the
+// updated manifest after apply (nil for --materialize, which doesn't mutate).
 type target struct {
-	chartName string
-	chartDir  string
-	opts      cuelib.Opts
-	given     map[string]string // input values from --value (or the venv manifest)
-	venv      *venv.Venv        // non-nil only in --venv mode (record manifest on apply)
-	label     string
+	manifest chart.Manifest
+	opts     cuelib.Opts
+	save     func(chart.Manifest) error
+	local    bool   // venv (local engine)
+	venvName string // set in --venv mode (for the activate hint)
+	label    string
 }
 
-// resolveTarget turns the plan/apply flags into a concrete target. The three
+// resolveTarget turns the plan/apply flags into a composition target. The three
 // modes (default global, --venv local, --materialize global-from-manifest) are
-// mutually exclusive.
+// mutually exclusive. Applying a chart accumulates it into the manifest's execs.
 func resolveTarget(chartArg, venvName, materialize string, values map[string]string) (target, error) {
 	switch {
 	case materialize != "":
@@ -70,19 +71,14 @@ func resolveTarget(chartArg, venvName, materialize string, values map[string]str
 		if err != nil {
 			return target{}, fmt.Errorf("read venv manifest: %w", err)
 		}
-		if m.Chart == "" {
-			return target{}, fmt.Errorf("venv %q has no chart installed; run `coffeeenv apply --venv %s <chart>` first", materialize, materialize)
+		if len(m.Execs) == 0 {
+			return target{}, fmt.Errorf("venv %q has no charts installed; run `coffeeenv apply --venv %s <chart>` first", materialize, materialize)
 		}
-		c, err := resolveChart(m.Chart)
-		if err != nil {
-			return target{}, err
-		}
+		m.Values = mergeValues(m.Values, values)
 		return target{
-			chartName: m.Chart,
-			chartDir:  c.Dir,
-			opts:      cuelib.Opts{Engine: "global", Root: "~"},
-			given:     m.Values,
-			label:     fmt.Sprintf("materialize %s (chart %s)", materialize, m.Chart),
+			manifest: m,
+			opts:     cuelib.Opts{Engine: "global", Root: "~"},
+			label:    fmt.Sprintf("materialize %s", materialize),
 		}, nil
 
 	case venvName != "":
@@ -93,32 +89,59 @@ func resolveTarget(chartArg, venvName, materialize string, values map[string]str
 		if !v.Exists() {
 			return target{}, fmt.Errorf("no venv %q — run `coffeeenv venv create %s` first", venvName, venvName)
 		}
-		c, err := resolveChart(chartArg)
+		m, err := v.ReadManifest()
 		if err != nil {
+			return target{}, fmt.Errorf("read venv manifest: %w", err)
+		}
+		if m, err = accumulate(m, chartArg, values); err != nil {
 			return target{}, err
 		}
 		return target{
-			chartName: c.Name,
-			chartDir:  c.Dir,
-			opts:      cuelib.Opts{Engine: "local", Root: v.Dir},
-			given:     values,
-			venv:      &v,
-			label:     fmt.Sprintf("venv %s (chart %s)", venvName, c.Name),
+			manifest: m,
+			opts:     cuelib.Opts{Engine: "local", Root: v.Dir},
+			save:     v.WriteManifest,
+			local:    true,
+			venvName: venvName,
+			label:    fmt.Sprintf("venv %s", venvName),
 		}, nil
 
 	default:
-		c, err := resolveChart(chartArg)
+		m, err := readGlobalManifest()
 		if err != nil {
 			return target{}, err
 		}
+		if m, err = accumulate(m, chartArg, values); err != nil {
+			return target{}, err
+		}
 		return target{
-			chartName: c.Name,
-			chartDir:  c.Dir,
-			opts:      cuelib.Opts{Engine: "global", Root: "~"},
-			given:     values,
-			label:     fmt.Sprintf("chart %s", c.Name),
+			manifest: m,
+			opts:     cuelib.Opts{Engine: "global", Root: "~"},
+			save:     writeGlobalManifest,
+			label:    "global",
 		}, nil
 	}
+}
+
+// accumulate adds chartArg's module to the manifest's execs (dedup) and merges
+// its values, then layers the --value flags on top.
+func accumulate(m chart.Manifest, chartArg string, flags map[string]string) (chart.Manifest, error) {
+	if chartArg != "" {
+		c, err := resolveChart(chartArg)
+		if err != nil {
+			return m, err
+		}
+		cm, ok, err := c.ReadManifest()
+		if err != nil {
+			return m, err
+		}
+		if !ok || cm.Module == "" {
+			return m, fmt.Errorf("chart %q has no manifest.json with a module (not an executable chart)", c.Name)
+		}
+		m.Execs = appendDedup(m.Execs, cm.Module)
+		m.Values = mergeValues(m.Values, cm.Values)
+	}
+	m.Values = mergeValues(m.Values, flags)
+	return m, nil
 }
 
 // parseValues turns repeated --value key=val flags into a map.
@@ -164,11 +187,15 @@ func resolveChart(name string) (chart.Chart, error) {
 	return c, nil
 }
 
-// computePlan resolves a target's chart inputs, decodes the states, and diffs
-// them against the system. It returns the plan and the resolved values map (for
-// recording into a venv manifest). prompt is nil for non-interactive callers.
+// computePlan composes the target's execs into states, decodes them, and diffs
+// against the system. It returns the plan and the resolved values map (to persist
+// back into the manifest). prompt is nil for non-interactive callers.
 func computePlan(ctx context.Context, t target, prompt cuelib.PromptFunc) (state.Plan, map[string]string, error) {
-	r, err := cuelib.Resolve(t.chartDir, t.opts, t.given, prompt)
+	deps, err := depsIndex()
+	if err != nil {
+		return state.Plan{}, nil, err
+	}
+	r, err := cuelib.Compose(t.manifest.Execs, deps, t.opts, t.manifest.Values, prompt)
 	if err != nil {
 		return state.Plan{}, nil, err
 	}

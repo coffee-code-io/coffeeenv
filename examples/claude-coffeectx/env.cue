@@ -1,8 +1,7 @@
 // Claude + Coffeecode: a minimal chart that installs coffeectx for Claude Code.
-// Embed the agent target and coffeectx.#Mcp; the only prompt is
-// `coffeectx.confirm`. coffeectx feeds the MCP server into agent.mcps, which the
-// Claude target renders into ~/.claude.json. (Swap claude.#Claude for
-// codex.#Codex to target Codex, or pi.#Pi to install the pi.dev extension.)
+// #Main composes the Claude agent target and coffeectx.#Mcp; coffeectx feeds the
+// MCP server into agent.mcps, which the Claude target renders into ~/.claude.json.
+// (Swap claude.#Main for codex.#Main, or pi.#Main to install the pi.dev extension.)
 package env
 
 import (
@@ -10,5 +9,9 @@ import (
 	"coffeeenv.dev/lib/coffeectx"
 )
 
-claude.#Claude
-coffeectx.#Mcp
+#Main: {
+	claude.#Main
+	coffeectx.#Mcp
+}
+
+#Main

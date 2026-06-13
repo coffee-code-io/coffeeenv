@@ -3,13 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/coffee-code-io/coffeeenv/internal/cuelib"
 	"github.com/coffee-code-io/coffeeenv/internal/state"
-	"github.com/coffee-code-io/coffeeenv/internal/venv"
 )
 
 var (
@@ -49,16 +47,20 @@ Modes:
 		if err != nil {
 			return err
 		}
+		// Persist the accumulated composition (execs + resolved values) back to the
+		// target manifest, so the venv/global setup is the union of all applies.
+		t.manifest.Values = resolvedValues
+		saveManifest := func() error {
+			if t.save == nil {
+				return nil
+			}
+			return t.save(t.manifest)
+		}
 
 		fmt.Printf("Target: %s\n", t.label)
 		if len(p.Actions) == 0 {
 			fmt.Printf("Nothing to do. %d state(s) already up to date.\n", p.Unchanged)
-			if t.venv != nil {
-				if err := recordManifest(*t.venv, t, resolvedValues); err != nil {
-					return fmt.Errorf("record venv manifest: %w", err)
-				}
-			}
-			return nil
+			return saveManifest()
 		}
 
 		printPlan(p)
@@ -79,10 +81,8 @@ Modes:
 		}
 		fmt.Printf("\nApplied %d change(s).\n", len(p.Actions))
 
-		if t.venv != nil {
-			if err := recordManifest(*t.venv, t, resolvedValues); err != nil {
-				return fmt.Errorf("record venv manifest: %w", err)
-			}
+		if err := saveManifest(); err != nil {
+			return fmt.Errorf("save manifest: %w", err)
 		}
 		printEnvHintIfNeeded(t, p)
 		return nil
@@ -94,17 +94,6 @@ func init() {
 	applyCmd.Flags().StringVar(&applyVenv, "venv", "", "install into the named venv (engine=local)")
 	applyCmd.Flags().StringVar(&applyMaterialize, "materialize", "", "re-render the named venv's chart globally")
 	applyCmd.Flags().StringArrayVarP(&applyValues, "value", "V", nil, "set an input value: key=val (repeatable)")
-}
-
-// recordManifest writes which chart + resolved values were rendered into the venv.
-func recordManifest(v venv.Venv, t target, values map[string]string) error {
-	return v.WriteManifest(venv.Manifest{
-		Name:    v.Name,
-		Chart:   t.chartName,
-		Values:  values,
-		Engine:  "local",
-		BuiltAt: time.Now().UTC().Format(time.RFC3339),
-	})
 }
 
 // stdinIsTTY reports whether stdin is an interactive terminal.
@@ -119,8 +108,8 @@ func printEnvHintIfNeeded(t target, p state.Plan) {
 		if a.Kind != "set-env" {
 			continue
 		}
-		if t.venv != nil {
-			fmt.Printf("\nEnv vars written to the venv. Activate with:\n  coffeeenv venv shell %s\n", t.venv.Name)
+		if t.local {
+			fmt.Printf("\nEnv vars written to the venv. Activate with:\n  coffeeenv venv shell %s\n", t.venvName)
 		} else {
 			fmt.Println("\nEnv vars updated. Add this to your shell rc if you haven't:")
 			fmt.Println("  source ~/.config/coffeeenv/activate.sh")

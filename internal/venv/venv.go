@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/coffee-code-io/coffeeenv/internal/chart"
 	"github.com/coffee-code-io/coffeeenv/internal/sys"
 )
 
@@ -76,17 +77,8 @@ func (v Venv) Exists() bool {
 	return err == nil
 }
 
-// Manifest records which chart and values were rendered into the venv.
-type Manifest struct {
-	Name    string            `json:"name"`
-	Chart   string            `json:"chart,omitempty"`
-	Values  map[string]string `json:"values,omitempty"`
-	Engine  string            `json:"engine"`
-	BuiltAt string            `json:"builtAt,omitempty"`
-}
-
 // Create initializes an empty venv: directories, an activate script, and an
-// empty manifest.
+// empty composition manifest (an executable chart with no execs yet).
 func (v Venv) Create() error {
 	if v.Exists() {
 		return fmt.Errorf("venv %q already exists at %s", v.Name, v.Dir)
@@ -97,7 +89,7 @@ func (v Venv) Create() error {
 	if err := sys.WriteFileAtomic(v.Activate(), []byte(v.activateScript()), 0o644); err != nil {
 		return err
 	}
-	return v.WriteManifest(Manifest{Name: v.Name, Engine: "local"})
+	return v.WriteManifest(chart.Manifest{Module: "coffeeenv.dev/venv/" + v.Name, Type: "executable"})
 }
 
 // activateScript prepends the venv's bin to PATH and sources the env-state file.
@@ -109,21 +101,21 @@ export PATH=%q:"$PATH"
 `, v.Name, v.Name, v.Bin(), v.EnvFile(), v.EnvFile())
 }
 
-// ReadManifest loads the venv's manifest.
-func (v Venv) ReadManifest() (Manifest, error) {
+// ReadManifest loads the venv's composition manifest.
+func (v Venv) ReadManifest() (chart.Manifest, error) {
 	b, err := os.ReadFile(v.ManifestPath())
 	if err != nil {
-		return Manifest{}, err
+		return chart.Manifest{}, err
 	}
-	var m Manifest
+	var m chart.Manifest
 	if err := json.Unmarshal(b, &m); err != nil {
-		return Manifest{}, err
+		return chart.Manifest{}, err
 	}
 	return m, nil
 }
 
-// WriteManifest persists the venv's manifest.
-func (v Venv) WriteManifest(m Manifest) error {
+// WriteManifest persists the venv's composition manifest.
+func (v Venv) WriteManifest(m chart.Manifest) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

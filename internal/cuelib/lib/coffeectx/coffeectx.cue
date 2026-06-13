@@ -15,6 +15,7 @@ package coffeectx
 
 import (
 	"coffeeenv.dev/lib/context"
+	core "coffeeenv.dev/lib/core"
 	ag "coffeeenv.dev/lib/agent"
 	// Aliased: the generated config has a `jobs.lsp` field that would otherwise
 	// shadow this package name where the command is resolved.
@@ -179,11 +180,13 @@ _explain: """
 	}
 }
 
-// #Setup is the full declarative configuration. It embeds #Mcp (server +
-// integration) and adds the config file, skill/job installs, the oauth login,
-// and auto-launch. It re-declares `coffeectx`/`agent` as explicit fields so its
-// own comprehensions resolve those namespaces after the mixin is embedded.
-#Setup: {
+// #Main is the full declarative configuration (the coffeectx executable target).
+// It embeds #Mcp (server + integration) and adds the config file, skill/job
+// installs, the oauth login, and auto-launch. It re-declares `coffeectx`/`agent`
+// as explicit fields so its own comprehensions resolve those namespaces after
+// the mixin is embedded.
+#Main: {
+	core.#Main
 	#Mcp
 	coffeectx: #CtxNS
 	agent: ag.#NS
@@ -191,7 +194,7 @@ _explain: """
 	// Require the in-built language servers, and install only the ones the
 	// projects use. The user can register more via `lsp: available: <lang>: {…}`.
 	lsplib.#Setup
-	lsplib.#InstallLsp & {languages: _langs}
+	lsplib.#Main & {languages: _langs}
 	lsp: lsplib.#LspNS
 	_langs: [for k, p in coffeectx.projects if p.language != "" {p.language}]
 	// Alias the registry to a name the config's `jobs.lsp` field can't shadow.

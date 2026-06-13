@@ -9,6 +9,7 @@ package lsp
 
 import (
 	"coffeeenv.dev/lib/context"
+	core "coffeeenv.dev/lib/core"
 	st "coffeeenv.dev/lib/states"
 )
 
@@ -59,10 +60,11 @@ _builtin: {
 	lsp: available: _builtin
 }
 
-// #InstallLsp lifts the install state of each selected language into the global
-// states map (replaces the old #LSP). Languages must be registered in
-// lsp.available. Embed it: `lsp.#InstallLsp & {languages: ["go"]}`.
-#InstallLsp: {
+// #Main lifts the install state of each selected language into the global
+// states map (the lsp executable target). Languages must be registered in
+// lsp.available. Embed it: `lsp.#Main & {languages: ["go"]}`.
+#Main: {
+	core.#Main
 	lsp: #LspNS
 	languages: [...string]
 	states: {[string]: st.#State}

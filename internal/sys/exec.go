@@ -45,6 +45,36 @@ func Stream(ctx context.Context, name string, args ...string) error {
 	return cmd.Run()
 }
 
+// RunEnv is Run with extra environment variables (appended to the current env).
+func RunEnv(ctx context.Context, env []string, name string, args ...string) (Result, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), env...)
+	var out, errb bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errb
+	err := cmd.Run()
+	res := Result{Stdout: out.String(), Stderr: errb.String()}
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			res.ExitCode = ee.ExitCode()
+			return res, nil
+		}
+		return res, fmt.Errorf("%s: %w", name, err)
+	}
+	return res, nil
+}
+
+// StreamEnv is Stream with extra environment variables (appended to the current
+// env) — used for installs that select their target via env (e.g. go's GOBIN).
+func StreamEnv(ctx context.Context, env []string, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
 // Look reports whether a binary is resolvable on PATH.
 func Look(name string) bool {
 	_, err := exec.LookPath(name)

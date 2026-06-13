@@ -8,13 +8,14 @@ import (
 	"strings"
 	"list"
 	"coffeeenv.dev/lib/context"
+	core "coffeeenv.dev/lib/core"
 	ag "coffeeenv.dev/lib/agent"
 	st "coffeeenv.dev/lib/states"
 )
 
 // #Codex is the OpenAI Codex agent target.
-#Codex: {
-	ag.#Base
+#Main: {
+	core.#Main
 	agent: ag.#NS
 	agent: name: "codex"
 

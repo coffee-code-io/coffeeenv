@@ -12,10 +12,6 @@
 // it into that agent's file layout.
 package agent
 
-import (
-	"coffeeenv.dev/lib/context"
-	st "coffeeenv.dev/lib/states"
-)
 
 // #Skill is an agent-agnostic skill. Content comes from either an inline `body`
 // (becomes SKILL.md) or `files`: a filesystem path (string — copied in via a
@@ -51,17 +47,3 @@ import (
 	md: {[string]: string}
 }
 
-// #Base types the global output (`states` is an open map of basic states) and
-// adds the venv PATH state. Agent targets embed it; feature mixins only need to
-// type `states` (which unifies with this). Under the local engine, local npm
-// installs land bins in <root>/node_modules/.bin — put that on PATH.
-#Base: {
-	states: {[string]: st.#State}
-	if context.engine == "local" {
-		states: "PATH": st.#EnvState & {
-			value:  "\(context.root)/node_modules/.bin:$PATH"
-			expand: true
-			target: "\(context.root)/env.sh"
-		}
-	}
-}
