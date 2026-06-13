@@ -103,6 +103,17 @@ func TestCoffeectxSetup(t *testing.T) {
 	if _, ok := m["lsp-install-typescript"]; !ok {
 		t.Errorf("missing lsp-install-typescript state; got %v", names(r.States))
 	}
+	// Each project gets an init shell state, guarded by its db.
+	initSt, ok := m["coffeectx-init-myrepo"]
+	if !ok {
+		t.Fatalf("missing coffeectx-init-myrepo state; got %v", names(r.States))
+	}
+	if got, _ := initSt.Params["run"].(string); got != "coffeectx init myrepo" {
+		t.Errorf("init run = %q", got)
+	}
+	if got, _ := initSt.Params["creates"].(string); got != "~/.coffeecode/db/myrepo.db" {
+		t.Errorf("init creates = %q", got)
+	}
 
 	// Embedding auth: an AuthSettings block under core.embed.auth with the
 	// embeddings model and shared credential.

@@ -262,6 +262,15 @@ _explain: """
 			data:   _config
 		}
 
+		// Initialize each project once the config is written (shell states run
+		// after files). Guarded by the project db so init runs only once.
+		for k, p in coffeectx.projects {
+			"coffeectx-init-\(k)": st.#ShellState & {
+				run:     "coffeectx init \(k)"
+				creates: "\(_home)/.coffeecode/db/\(k).db"
+			}
+		}
+
 		// Install every context-registered skill into the coffeecode skill dir.
 		for sname, sk in agent.skills if sk.body != "" {
 			"coffeecode-skill-\(sname)": st.#FileState & {
