@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -29,6 +30,7 @@ type Opts struct {
 	Engine string            // "global" | "local"
 	Root   string            // "~" for global; the venv dir for local
 	OS     string            // host GOOS ("darwin", "linux", ...); empty defaults to runtime.GOOS
+	Now    int64             // current time, unix seconds; 0 defaults to time.Now()
 	Deps   map[string]string // module path -> chart dir; mounted so `import "<module>"` resolves
 }
 
@@ -175,11 +177,15 @@ func injectContext(overlay map[string]load.Source, venvAbs string, opts Opts) {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
+	nowUnix := opts.Now
+	if nowUnix == 0 {
+		nowUnix = time.Now().UTC().Unix()
+	}
 	pkgRoot := filepath.Join(venvAbs, "cue.mod", "pkg", filepath.FromSlash(libModule))
 	// NB: CUE's loader ignores files beginning with "_" or ".", so the injected
 	// file must not start with an underscore.
 	path := filepath.Join(pkgRoot, "context", "inject.cue")
-	src := fmt.Sprintf("package context\nengine: %q\nroot: %q\nos: %q\n", opts.Engine, root, goos)
+	src := fmt.Sprintf("package context\nengine: %q\nroot: %q\nos: %q\nnowUnix: %d\n", opts.Engine, root, goos, nowUnix)
 	overlay[path] = load.FromString(src)
 }
 

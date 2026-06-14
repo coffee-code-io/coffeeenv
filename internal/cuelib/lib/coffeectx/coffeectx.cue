@@ -14,6 +14,8 @@
 package coffeectx
 
 import (
+	"strings"
+	"time"
 	"coffeeenv.dev/lib/context"
 	core "coffeeenv.dev/lib/core"
 	ag "coffeeenv.dev/lib/agent"
@@ -199,6 +201,9 @@ _explain: """
 	_langs: [for k, p in coffeectx.projects if p.language != "" {p.language}]
 	// Alias the registry to a name the config's `jobs.lsp` field can't shadow.
 	_lspAvail: lsp.available
+	// Alias the active agent name: inside a project struct (which defines its own
+	// `agent: auth: …`) a bare `agent` would resolve to that, not the namespace.
+	_agentName: agent.name
 
 	_local: context.engine == "local"
 	_home:  context.root
@@ -240,12 +245,38 @@ _explain: """
 					core: embed: auth: _embedAuth & {model: coffeectx.embeddingsModel}
 					agent: auth: _mainAuth & {model:        coffeectx.uiModel}
 					mcp: tools: {search: true, exact: true, regex: true, raw_query: true, load_node: true, insert: false}
+
+					// In-built jobs. Agent-log import: emit all three agent keys but
+					// enable only the active one; only claude carries import params
+					// today (codex/pi on-disk log schema isn't wired yet, so they stay
+					// off). Logs live in the user's real home, hence the literal "~".
+					jobs: claude: {
+						enabled: _agentName == "claude"
+						if _agentName == "claude" {
+							parameters: {
+								path:       "~/.claude/projects/\(strings.Replace(p.repoPath, "/", "-", -1))"
+								newerThan:  time.Unix(context.nowUnix-86400, 0) // since yesterday
+								intervalMs: 30000
+							}
+						}
+						if _agentName != "claude" {parameters: null}
+					}
+					jobs: codex: {enabled: false, parameters: null}
+					jobs: pi: {enabled: false, parameters: null}
+
+					// Always-on framework jobs: plan import, the indexer (carries the
+					// indexer-agent credential), and span linking.
+					jobs: plans: {enabled: true, parameters: null}
+					jobs: indexer: {enabled: true, parameters: {auth: _mainAuth & {model: coffeectx.indexerModel}}}
+					jobs: "span-link": {enabled: true}
+
 					if p.language != "" {
 						jobs: lsp: {enabled: true, parameters: {lspCommand: _lspAvail[p.language].command}}
 					}
 					if len(p.skills) > 0 {
 						skills: jobs: include: p.skills
 					}
+					// User-registered jobs enabled via the project's @multichoice.
 					for jn in p.jobs {
 						jobs: (jn): {enabled: true, parameters: {auth: _mainAuth & {model: coffeectx.indexerModel}}}
 					}

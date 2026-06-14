@@ -115,6 +115,48 @@ func TestCoffeectxSetup(t *testing.T) {
 		t.Errorf("init creates = %q", got)
 	}
 
+	// In-built jobs: the active agent (claude) log-import is enabled with params;
+	// codex/pi are emitted but off; plans/indexer/span-link are always on.
+	jobsAll, _ := myrepo["jobs"].(map[string]any)
+	claudeJob, _ := jobsAll["claude"].(map[string]any)
+	if claudeJob == nil || claudeJob["enabled"] != true {
+		t.Fatalf("jobs.claude should be enabled; jobs=%#v", jobsAll)
+	}
+	claudeParams, _ := claudeJob["parameters"].(map[string]any)
+	if got, _ := claudeParams["path"].(string); got != "~/.claude/projects/-home-me-repo" {
+		t.Errorf("jobs.claude path = %q", got)
+	}
+	if got, _ := claudeParams["intervalMs"].(int); got != 30000 {
+		// numbers may decode as other kinds depending on the extractor; check non-empty too.
+		if s, _ := claudeParams["intervalMs"]; s == nil {
+			t.Errorf("jobs.claude intervalMs missing; params=%#v", claudeParams)
+		}
+	}
+	if s, _ := claudeParams["newerThan"].(string); s == "" {
+		t.Errorf("jobs.claude newerThan should be set; params=%#v", claudeParams)
+	}
+	if cj, _ := jobsAll["codex"].(map[string]any); cj == nil || cj["enabled"] != false {
+		t.Errorf("jobs.codex should be present and disabled; got %#v", jobsAll["codex"])
+	}
+	if pj, _ := jobsAll["pi"].(map[string]any); pj == nil || pj["enabled"] != false {
+		t.Errorf("jobs.pi should be present and disabled; got %#v", jobsAll["pi"])
+	}
+	if pl, _ := jobsAll["plans"].(map[string]any); pl == nil || pl["enabled"] != true {
+		t.Errorf("jobs.plans should be enabled; got %#v", jobsAll["plans"])
+	}
+	if sl, _ := jobsAll["span-link"].(map[string]any); sl == nil || sl["enabled"] != true {
+		t.Errorf("jobs.span-link should be enabled; got %#v", jobsAll["span-link"])
+	}
+	idxJob, _ := jobsAll["indexer"].(map[string]any)
+	if idxJob == nil || idxJob["enabled"] != true {
+		t.Fatalf("jobs.indexer should be enabled; got %#v", jobsAll["indexer"])
+	}
+	idxParams, _ := idxJob["parameters"].(map[string]any)
+	idxAuth, _ := idxParams["auth"].(map[string]any)
+	if got, _ := idxAuth["model"].(string); got != "index-1" {
+		t.Errorf("jobs.indexer auth.model = %v, want index-1", got)
+	}
+
 	// Embedding auth: an AuthSettings block under core.embed.auth with the
 	// embeddings model and shared credential.
 	core, _ := myrepo["core"].(map[string]any)
