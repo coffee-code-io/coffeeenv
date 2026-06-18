@@ -149,6 +149,16 @@ _explain: """
 			coffeectx: {command: "coffeectx-mcp"}
 		}
 	}
+	// For pi: register a #PiExtension that installs the plugin package and writes
+	// the re-export extension. The pi target installs it via `pi install` and
+	// renders extensions/coffeectx.ts.
+	agent: extensions: {
+		if agent.name == "pi" {
+			coffeectx: {
+				package: "@coffeectx/pi-plugin"
+			}
+		}
+	}
 
 	states: {
 		// The indexer (daemon + `coffeectx` CLI) is always installed.
@@ -163,20 +173,6 @@ _explain: """
 				package: "@coffeectx/server"
 				version: _version
 				if _local {prefix: context.root}
-			}
-		}
-		// The pi.dev plugin + extension — only for the pi agent.
-		if agent.name == "pi" {
-			"coffeectx-pi-plugin": st.#NpmState & {
-				package: "@coffeectx/pi-plugin"
-				version: _version
-				if _local {prefix: context.root}
-			}
-		}
-		if agent.name == "pi" {
-			"coffeectx-pi-ext": st.#FileState & {
-				path:    "\(_home)/.pi/agent/extensions/coffeectx.ts"
-				content: "export { default } from '@coffeectx/pi-plugin';\n"
 			}
 		}
 	}

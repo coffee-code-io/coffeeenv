@@ -34,16 +34,32 @@ package agent
 	url?: string
 }
 
+// #PiExtension is a pi.dev integration (only the pi target renders these — it is
+// defined here, alongside #Skill/#MCP, to keep the shared #NS schema in one place
+// and avoid a pi->agent import cycle). It can be any of: a pi `package` installed
+// via `pi install npm:<package>`; a TS module from an inline `body` (->
+// extensions/<name>.ts); or `files` (a filesystem path copied in, or an inline
+// relpath -> content map under extensions/<name>/).
+#PiExtension: {
+	name?:        string
+	description?: string
+	package?:     string
+	body:         string | *""
+	files:        string | {[string]: string} | *{}
+}
+
 // #NS is the schema of the shared `agent` namespace. Every target that reads or
 // writes the namespace declares `agent: #NS` (an explicit field, so bare
 // `agent` references inside the target's comprehensions resolve after the mixin
 // is embedded). `name` is set by the active agent target; `md` is a name-keyed
-// map of AGENTS.md/CLAUDE.md paragraphs joined in sorted-key order.
+// map of AGENTS.md/CLAUDE.md paragraphs joined in sorted-key order; `extensions`
+// is read only by the pi target (claude/codex ignore it).
 #NS: {
 	name:    string | *""
 	version: string | *"latest"
 	skills: {[string]: #Skill}
 	mcps: {[string]: #MCP}
 	md: {[string]: string}
+	extensions: {[string]: #PiExtension}
 }
 
