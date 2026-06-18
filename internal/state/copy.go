@@ -76,6 +76,16 @@ func (copyHandler) Read(_ context.Context, desired Desired) (Observed, error) {
 				return err
 			}
 			if de.IsDir() {
+				// Never install coffeeenv-internal scaffolding (defensive: a skill
+				// chart carries no cue.mod, but other copy sources might).
+				if p != src && de.Name() == "cue.mod" {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			// Skip reserved coffeeenv metadata so a pulled skill's lock/manifest
+			// don't leak into the agent's skills dir.
+			if de.Name() == "coffeeenv.lock.json" || de.Name() == "manifest.json" {
 				return nil
 			}
 			rel, err := filepath.Rel(src, p)

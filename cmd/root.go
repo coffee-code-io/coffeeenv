@@ -36,7 +36,7 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.AddCommand(pullCmd, planCmd, applyCmd, venvCmd)
+	rootCmd.AddCommand(pullCmd, planCmd, applyCmd, planSkillCmd, applySkillCmd, venvCmd)
 }
 
 // target is a resolved plan/apply destination: the composition manifest (its
@@ -51,12 +51,48 @@ type target struct {
 	label    string
 }
 
+// loadTarget opens the composition manifest for the chosen scope (global, or a
+// named venv) along with its engine opts, save func, and label.
+func loadTarget(venvName string) (target, error) {
+	if venvName != "" {
+		v, err := venv.Open(venvName)
+		if err != nil {
+			return target{}, err
+		}
+		if !v.Exists() {
+			return target{}, fmt.Errorf("no venv %q — run `coffeeenv venv create %s` first", venvName, venvName)
+		}
+		m, err := v.ReadManifest()
+		if err != nil {
+			return target{}, fmt.Errorf("read venv manifest: %w", err)
+		}
+		return target{
+			manifest: m,
+			opts:     cuelib.Opts{Engine: "local", Root: v.Dir},
+			save:     v.WriteManifest,
+			local:    true,
+			venvName: venvName,
+			label:    fmt.Sprintf("venv %s", venvName),
+		}, nil
+	}
+	m, err := readGlobalManifest()
+	if err != nil {
+		return target{}, err
+	}
+	return target{
+		manifest: m,
+		opts:     cuelib.Opts{Engine: "global", Root: "~"},
+		save:     writeGlobalManifest,
+		label:    "global",
+	}, nil
+}
+
 // resolveTarget turns the plan/apply flags into a composition target. The three
 // modes (default global, --venv local, --materialize global-from-manifest) are
-// mutually exclusive. Applying a chart accumulates it into the manifest's execs.
-func resolveTarget(chartArg, venvName, materialize string, values map[string]string) (target, error) {
-	switch {
-	case materialize != "":
+// mutually exclusive. Applying a chart accumulates it into the manifest's execs;
+// a chart arg that is a git/oci/local source is pulled first (deduped).
+func resolveTarget(ctx context.Context, chartArg, venvName, materialize string, values map[string]string) (target, error) {
+	if materialize != "" {
 		if venvName != "" || chartArg != "" {
 			return target{}, fmt.Errorf("--materialize cannot be combined with --venv or a chart argument")
 		}
@@ -80,46 +116,39 @@ func resolveTarget(chartArg, venvName, materialize string, values map[string]str
 			opts:     cuelib.Opts{Engine: "global", Root: "~"},
 			label:    fmt.Sprintf("materialize %s", materialize),
 		}, nil
-
-	case venvName != "":
-		v, err := venv.Open(venvName)
-		if err != nil {
-			return target{}, err
-		}
-		if !v.Exists() {
-			return target{}, fmt.Errorf("no venv %q — run `coffeeenv venv create %s` first", venvName, venvName)
-		}
-		m, err := v.ReadManifest()
-		if err != nil {
-			return target{}, fmt.Errorf("read venv manifest: %w", err)
-		}
-		if m, err = accumulate(m, chartArg, values); err != nil {
-			return target{}, err
-		}
-		return target{
-			manifest: m,
-			opts:     cuelib.Opts{Engine: "local", Root: v.Dir},
-			save:     v.WriteManifest,
-			local:    true,
-			venvName: venvName,
-			label:    fmt.Sprintf("venv %s", venvName),
-		}, nil
-
-	default:
-		m, err := readGlobalManifest()
-		if err != nil {
-			return target{}, err
-		}
-		if m, err = accumulate(m, chartArg, values); err != nil {
-			return target{}, err
-		}
-		return target{
-			manifest: m,
-			opts:     cuelib.Opts{Engine: "global", Root: "~"},
-			save:     writeGlobalManifest,
-			label:    "global",
-		}, nil
 	}
+
+	t, err := loadTarget(venvName)
+	if err != nil {
+		return target{}, err
+	}
+	if chartArg != "" && chart.IsSource(chartArg) {
+		name, err := pullChart(ctx, chartArg)
+		if err != nil {
+			return target{}, err
+		}
+		chartArg = name
+	}
+	if t.manifest, err = accumulate(t.manifest, chartArg, values); err != nil {
+		return target{}, err
+	}
+	return t, nil
+}
+
+// resolveSkillTarget is resolveTarget for a skill: it pulls the skill source
+// (deduped) and accumulates it into the manifest's skills (not execs). Skills
+// attach to the global setup or a venv; --materialize is not supported.
+func resolveSkillTarget(ctx context.Context, skillArg, venvName string, values map[string]string) (target, error) {
+	t, err := loadTarget(venvName)
+	if err != nil {
+		return target{}, err
+	}
+	name, err := pullSkill(ctx, skillArg)
+	if err != nil {
+		return target{}, err
+	}
+	t.manifest = accumulateSkill(t.manifest, name, values)
+	return t, nil
 }
 
 // accumulate adds chartArg's module to the manifest's execs (dedup) and merges
@@ -142,6 +171,14 @@ func accumulate(m chart.Manifest, chartArg string, flags map[string]string) (cha
 	}
 	m.Values = mergeValues(m.Values, flags)
 	return m, nil
+}
+
+// accumulateSkill adds a pulled skill's name to the manifest's skills (dedup) and
+// layers the --value flags on top.
+func accumulateSkill(m chart.Manifest, skillName string, flags map[string]string) chart.Manifest {
+	m.Skills = appendDedup(m.Skills, skillName)
+	m.Values = mergeValues(m.Values, flags)
+	return m
 }
 
 // parseValues turns repeated --value key=val flags into a map.
@@ -195,7 +232,11 @@ func computePlan(ctx context.Context, t target, prompt cuelib.PromptFunc) (state
 	if err != nil {
 		return state.Plan{}, nil, err
 	}
-	r, err := cuelib.Compose(t.manifest.Execs, deps, t.opts, t.manifest.Values, prompt)
+	skillDirs, err := skillDirsFor(t.manifest.Skills)
+	if err != nil {
+		return state.Plan{}, nil, err
+	}
+	r, err := cuelib.Compose(t.manifest.Execs, skillDirs, deps, t.opts, t.manifest.Values, prompt)
 	if err != nil {
 		return state.Plan{}, nil, err
 	}

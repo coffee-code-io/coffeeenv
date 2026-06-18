@@ -66,6 +66,57 @@ Examples:
 	},
 }
 
+// pullChart ensures the chart at source is pulled into the local charts dir and
+// returns its name. It dedups: an already-pulled chart of the same name is left
+// as-is. New pulls record the lock and recurse into dependencies.
+func pullChart(ctx context.Context, source string) (string, error) {
+	name := chartNameFromSource(source)
+	c, err := chart.Open(name)
+	if err != nil {
+		return "", err
+	}
+	if c.Exists() {
+		return name, nil
+	}
+	ref, commit, digest, err := c.Pull(ctx, source)
+	if err != nil {
+		return "", err
+	}
+	if err := c.WriteLock(chart.LockInfo{Source: source, Ref: ref, Commit: commit, Digest: digest,
+		PulledAt: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		return "", err
+	}
+	if _, err := pullDeps(ctx, c); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// pullSkill ensures the skill at source is pulled and returns its name. Like
+// pullChart it dedups; a bare (non-source) name must already be pulled.
+func pullSkill(ctx context.Context, source string) (string, error) {
+	name := chartNameFromSource(source)
+	c, err := chart.Open(name)
+	if err != nil {
+		return "", err
+	}
+	if c.Exists() {
+		return name, nil
+	}
+	if !chart.IsSource(source) {
+		return "", fmt.Errorf("no skill %q pulled — pass a git/oci/local source", name)
+	}
+	ref, commit, digest, err := c.PullSkill(ctx, source)
+	if err != nil {
+		return "", err
+	}
+	if err := c.WriteLock(chart.LockInfo{Source: source, Ref: ref, Commit: commit, Digest: digest,
+		PulledAt: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
 // pullDeps fetches the transitive `dependencies` of root, breadth-first,
 // deduping by source. Returns how many new charts were pulled.
 func pullDeps(ctx context.Context, root chart.Chart) (int, error) {

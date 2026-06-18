@@ -20,17 +20,7 @@ import (
 //
 // It returns ref/commit (git) and digest (oci) for the lock file.
 func (c Chart) Pull(ctx context.Context, source string) (ref, commit, digest string, err error) {
-	var srcDir string
-	cleanup := func() {}
-
-	switch {
-	case isOCISource(source):
-		srcDir, digest, cleanup, err = fetchOCI(ctx, source)
-	case isGitSource(source):
-		srcDir, ref, commit, cleanup, err = fetchGit(ctx, source)
-	default:
-		srcDir, err = localDir(source)
-	}
+	srcDir, ref, commit, digest, cleanup, err := fetch(ctx, source)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -50,6 +40,59 @@ func (c Chart) Pull(ctx context.Context, source string) (ref, commit, digest str
 		return "", "", "", err
 	}
 	return ref, commit, digest, nil
+}
+
+// PullSkill fetches a skill (agentskills.io / Anthropic Agent Skills format: a
+// directory with SKILL.md and supporting files, shipping no CUE) into the chart
+// directory. It marks the chart with a manifest of type "skill" and, unlike
+// Pull, writes no cue.mod — skills are file trees, not CUE packages.
+func (c Chart) PullSkill(ctx context.Context, source string) (ref, commit, digest string, err error) {
+	srcDir, ref, commit, digest, cleanup, err := fetch(ctx, source)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer cleanup()
+
+	if !hasSkill(srcDir) {
+		return "", "", "", fmt.Errorf("skill source %q has no SKILL.md", source)
+	}
+
+	if err := os.RemoveAll(c.Dir); err != nil {
+		return "", "", "", err
+	}
+	if err := copyTree(srcDir, c.Dir); err != nil {
+		return "", "", "", err
+	}
+	if err := c.WriteManifest(Manifest{Module: "coffeeenv.dev/skill/" + c.Name, Type: "skill"}); err != nil {
+		return "", "", "", err
+	}
+	return ref, commit, digest, nil
+}
+
+// fetch resolves a source through the transport dispatch into a temporary
+// directory, returning that dir plus provenance and a cleanup func.
+func fetch(ctx context.Context, source string) (srcDir, ref, commit, digest string, cleanup func(), err error) {
+	cleanup = func() {}
+	switch {
+	case isOCISource(source):
+		srcDir, digest, cleanup, err = fetchOCI(ctx, source)
+	case isGitSource(source):
+		srcDir, ref, commit, cleanup, err = fetchGit(ctx, source)
+	default:
+		srcDir, err = localDir(source)
+	}
+	return srcDir, ref, commit, digest, cleanup, err
+}
+
+// IsSource reports whether s is a pullable source (a transport URL or a local
+// path) rather than a bare chart/skill name. Pulled names are directory
+// basenames, so any "/" (or a scheme/fragment) marks a source.
+func IsSource(s string) bool {
+	return isGitSource(s) || isOCISource(s) ||
+		strings.HasPrefix(s, "local://") ||
+		strings.Contains(s, "://") ||
+		strings.Contains(s, "/") ||
+		strings.Contains(s, "#")
 }
 
 // localDir resolves a local source: a bare path or a local://<path> URL.
@@ -181,6 +224,12 @@ func excluded(name string) bool { return name == ".git" || name == "node_modules
 // may carry no .cue files).
 func hasManifest(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, "manifest.json"))
+	return err == nil
+}
+
+// hasSkill reports whether dir is an Agent Skill (a SKILL.md at its root).
+func hasSkill(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "SKILL.md"))
 	return err == nil
 }
 

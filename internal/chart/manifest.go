@@ -19,6 +19,7 @@ type Manifest struct {
 	Type         string            `json:"type"`                   // "executable" | "library"
 	Dependencies []string          `json:"dependencies,omitempty"` // sources to pull (any transport)
 	Execs        []string          `json:"execs,omitempty"`        // module paths of executable deps to run
+	Skills       []string          `json:"skills,omitempty"`       // names of skill charts to add to agent.skills
 	Values       map[string]string `json:"values,omitempty"`       // resolved inputs (flat path -> value)
 }
 
@@ -74,6 +75,30 @@ func Index() (map[string]Chart, error) {
 			out[m.Module] = c
 		} else {
 			out[name] = c
+		}
+	}
+	return out, nil
+}
+
+// SkillsIndex maps each pulled skill chart's name to its directory (charts whose
+// manifest type is "skill").
+func SkillsIndex() (map[string]string, error) {
+	names, err := List()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, name := range names {
+		c, err := Open(name)
+		if err != nil {
+			return nil, err
+		}
+		m, ok, err := c.ReadManifest()
+		if err != nil {
+			return nil, err
+		}
+		if ok && m.Type == "skill" {
+			out[name] = c.Dir
 		}
 	}
 	return out, nil

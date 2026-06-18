@@ -66,6 +66,49 @@ func TestCopyHandler(t *testing.T) {
 	}
 }
 
+// TestCopyHandlerSkipsMetadata: a copy never installs coffeeenv-internal
+// scaffolding (cue.mod/, manifest.json, coffeeenv.lock.json) — so a pulled skill
+// dir copies only its real content.
+func TestCopyHandlerSkipsMetadata(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	mustWrite(t, filepath.Join(src, "SKILL.md"), "skill")
+	mustWrite(t, filepath.Join(src, "manifest.json"), `{"type":"skill"}`)
+	mustWrite(t, filepath.Join(src, "coffeeenv.lock.json"), `{}`)
+	mustWrite(t, filepath.Join(src, "cue.mod", "module.cue"), `module: "x"`)
+
+	h := copyHandler{}
+	d, err := h.Decode(RawState{Type: "copy", Name: "k", Params: map[string]any{"src": src, "dst": dst}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := h.Read(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acts, err := h.Diff(d, obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acts) != 1 {
+		t.Fatalf("want 1 copy action (only SKILL.md), got %d", len(acts))
+	}
+	for _, a := range acts {
+		if err := h.Apply(context.Background(), a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dst, "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md should be copied: %v", err)
+	}
+	for _, skip := range []string{"manifest.json", "coffeeenv.lock.json", filepath.Join("cue.mod", "module.cue")} {
+		if _, err := os.Stat(filepath.Join(dst, skip)); err == nil {
+			t.Errorf("%s should not be copied", skip)
+		}
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

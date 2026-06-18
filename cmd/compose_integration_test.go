@@ -48,7 +48,7 @@ func TestApplyAccumulatesGlobal(t *testing.T) {
 	t.Setenv("COFFEEENV_ROOT", t.TempDir())
 	pullExample(t, "claude-basic")
 
-	tgt, err := resolveTarget("claude-basic", "", "", nil)
+	tgt, err := resolveTarget(context.Background(), "claude-basic", "", "", nil)
 	if err != nil {
 		t.Fatalf("resolveTarget: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestApplyAccumulatesGlobal(t *testing.T) {
 	}
 
 	// Applying again is idempotent (dedup): execs stays length 1.
-	tgt2, _ := resolveTarget("claude-basic", "", "", nil)
+	tgt2, _ := resolveTarget(context.Background(), "claude-basic", "", "", nil)
 	if len(tgt2.manifest.Execs) != 1 {
 		t.Errorf("re-apply should dedup execs, got %v", tgt2.manifest.Execs)
 	}
@@ -117,7 +117,7 @@ import "coffeeenv.dev/lib/agent/claude"
 	}
 
 	// Apply alpha, persist.
-	tgt, err := resolveTarget("alpha", "v", "", nil)
+	tgt, err := resolveTarget(context.Background(), "alpha", "v", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ import "coffeeenv.dev/lib/agent/claude"
 		t.Fatal(err)
 	}
 	// Apply beta on top.
-	tgt, err = resolveTarget("beta", "v", "", nil)
+	tgt, err = resolveTarget(context.Background(), "beta", "v", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

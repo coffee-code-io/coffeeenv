@@ -34,6 +34,8 @@ var planCmd = &cobra.Command{
 	Short: "Show what would change",
 	Long: `Render a chart and show the actions needed to converge.
 
+[chart] is a pulled chart name or a git/oci/local source (pulled first, deduped).
+
 Modes:
   plan [chart]              against the real system (engine=global)
   plan --venv <name> <chart>   into a local venv (engine=local)
@@ -44,7 +46,7 @@ Modes:
 		if err != nil {
 			return err
 		}
-		t, err := resolveTarget(firstArg(args), planVenv, planMaterialize, values)
+		t, err := resolveTarget(cmd.Context(), firstArg(args), planVenv, planMaterialize, values)
 		if err != nil {
 			return err
 		}

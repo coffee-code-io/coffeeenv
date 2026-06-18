@@ -22,6 +22,8 @@ var applyCmd = &cobra.Command{
 	Short: "Converge the chart's states",
 	Long: `Render a chart and apply the actions needed to converge.
 
+[chart] is a pulled chart name or a git/oci/local source (pulled first, deduped).
+
 Modes:
   apply [chart]              against the real system (engine=global)
   apply --venv <name> <chart>   install into a local venv (engine=local)
@@ -32,61 +34,67 @@ Modes:
 		if err != nil {
 			return err
 		}
-		t, err := resolveTarget(firstArg(args), applyVenv, applyMaterialize, values)
+		t, err := resolveTarget(cmd.Context(), firstArg(args), applyVenv, applyMaterialize, values)
 		if err != nil {
 			return err
 		}
-		// apply prompts for unresolved inputs only on a TTY; otherwise a nil
-		// PromptFunc errors listing the missing inputs. materialize never prompts.
-		var prompt cuelib.PromptFunc
-		if applyMaterialize == "" && stdinIsTTY() {
-			prompt = interactivePrompt
-		}
-
-		p, resolvedValues, err := computePlan(cmd.Context(), t, prompt)
-		if err != nil {
-			return err
-		}
-		// Persist the accumulated composition (execs + resolved values) back to the
-		// target manifest, so the venv/global setup is the union of all applies.
-		t.manifest.Values = resolvedValues
-		saveManifest := func() error {
-			if t.save == nil {
-				return nil
-			}
-			return t.save(t.manifest)
-		}
-
-		fmt.Printf("Target: %s\n", t.label)
-		if len(p.Actions) == 0 {
-			fmt.Printf("Nothing to do. %d state(s) already up to date.\n", p.Unchanged)
-			return saveManifest()
-		}
-
-		printPlan(p)
-		if !autoApprove {
-			ok, err := confirm("\nApply these changes?")
-			if err != nil {
-				return err
-			}
-			if !ok {
-				fmt.Println("Aborted.")
-				return nil
-			}
-		}
-
-		fmt.Println()
-		if err := (state.Engine{}).Apply(cmd.Context(), p); err != nil {
-			return err
-		}
-		fmt.Printf("\nApplied %d change(s).\n", len(p.Actions))
-
-		if err := saveManifest(); err != nil {
-			return fmt.Errorf("save manifest: %w", err)
-		}
-		printEnvHintIfNeeded(t, p)
-		return nil
+		// apply prompts for unresolved inputs only on a TTY; materialize never prompts.
+		return executeApply(cmd, t, applyMaterialize == "")
 	},
+}
+
+// executeApply computes the target's plan, prints it, confirms (unless
+// --auto-approve), applies it, and persists the accumulated manifest. allowPrompt
+// gates interactive input prompting (still requires a TTY).
+func executeApply(cmd *cobra.Command, t target, allowPrompt bool) error {
+	var prompt cuelib.PromptFunc
+	if allowPrompt && stdinIsTTY() {
+		prompt = interactivePrompt
+	}
+
+	p, resolvedValues, err := computePlan(cmd.Context(), t, prompt)
+	if err != nil {
+		return err
+	}
+	// Persist the accumulated composition (execs/skills + resolved values) back to
+	// the target manifest, so the venv/global setup is the union of all applies.
+	t.manifest.Values = resolvedValues
+	saveManifest := func() error {
+		if t.save == nil {
+			return nil
+		}
+		return t.save(t.manifest)
+	}
+
+	fmt.Printf("Target: %s\n", t.label)
+	if len(p.Actions) == 0 {
+		fmt.Printf("Nothing to do. %d state(s) already up to date.\n", p.Unchanged)
+		return saveManifest()
+	}
+
+	printPlan(p)
+	if !autoApprove {
+		ok, err := confirm("\nApply these changes?")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Println("Aborted.")
+			return nil
+		}
+	}
+
+	fmt.Println()
+	if err := (state.Engine{}).Apply(cmd.Context(), p); err != nil {
+		return err
+	}
+	fmt.Printf("\nApplied %d change(s).\n", len(p.Actions))
+
+	if err := saveManifest(); err != nil {
+		return fmt.Errorf("save manifest: %w", err)
+	}
+	printEnvHintIfNeeded(t, p)
+	return nil
 }
 
 func init() {

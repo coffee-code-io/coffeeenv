@@ -40,7 +40,7 @@ import "coffeeenv.dev/lib/agent/claude"
 `)
 	deps := map[string]string{"coffeeenv.dev/test/a": aDir, "coffeeenv.dev/test/b": bDir}
 	r, err := Compose([]string{"coffeeenv.dev/test/a", "coffeeenv.dev/test/b"},
-		deps, Opts{Engine: "global", Root: "~"}, nil, nil)
+		nil, deps, Opts{Engine: "global", Root: "~"}, nil, nil)
 	if err != nil {
 		t.Fatalf("compose: %v", err)
 	}
@@ -54,7 +54,7 @@ import "coffeeenv.dev/lib/agent/claude"
 
 // TestComposeEmpty: a composition with no execs resolves to zero states.
 func TestComposeEmpty(t *testing.T) {
-	r, err := Compose(nil, nil, Opts{Engine: "global", Root: "~"}, nil, nil)
+	r, err := Compose(nil, nil, nil, Opts{Engine: "global", Root: "~"}, nil, nil)
 	if err != nil {
 		t.Fatalf("compose empty: %v", err)
 	}
