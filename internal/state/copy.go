@@ -20,8 +20,11 @@ func init() { Register(&copyHandler{}) }
 type copyHandler struct{}
 
 type copyDesired struct {
-	Src string `json:"src"`
-	Dst string `json:"dst"`
+	Src      string `json:"src"`
+	Dst      string `json:"dst"`
+	Perm     uint32 `json:"perm"`
+	MkdirAll *bool  `json:"mkdir_all"`
+	DirPerm  uint32 `json:"dir_perm"`
 }
 
 // copyFile is one source->dest pair to materialize.
@@ -46,6 +49,13 @@ func (copyHandler) Decode(rs RawState) (Desired, error) {
 	if p.Src == "" || p.Dst == "" {
 		return nil, errors.New("copy: src and dst are required")
 	}
+	if p.MkdirAll == nil {
+		mkdirAll := true
+		p.MkdirAll = &mkdirAll
+	}
+	if p.DirPerm == 0 {
+		p.DirPerm = 0o755
+	}
 	return &p, nil
 }
 
@@ -66,6 +76,9 @@ func (copyHandler) Read(_ context.Context, desired Desired) (Observed, error) {
 		b, err := os.ReadFile(srcAbs)
 		if err != nil {
 			return err
+		}
+		if d.Perm != 0 {
+			mode = os.FileMode(d.Perm)
 		}
 		planned = append(planned, copyFile{srcAbs: srcAbs, dstAbs: dstAbs, content: b, mode: mode})
 		return nil
@@ -117,7 +130,11 @@ func (copyHandler) Read(_ context.Context, desired Desired) (Observed, error) {
 			}
 			return nil, err
 		}
-		if sys.HashBytes(existing) != sys.HashBytes(cf.content) {
+		info, err := os.Stat(cf.dstAbs)
+		if err != nil {
+			return nil, err
+		}
+		if sys.HashBytes(existing) != sys.HashBytes(cf.content) || info.Mode().Perm() != cf.mode {
 			obs.pending = append(obs.pending, cf)
 		}
 	}
@@ -133,7 +150,7 @@ func (copyHandler) Diff(desired Desired, observed Observed) ([]Action, error) {
 			StateName: d.Dst,
 			Kind:      "copy-file",
 			Summary:   fmt.Sprintf("copy %s -> %s", cf.srcAbs, cf.dstAbs),
-			Payload:   filePayload{path: cf.dstAbs, content: cf.content, mode: cf.mode},
+			Payload:   filePayload{path: cf.dstAbs, content: cf.content, mode: cf.mode, mkdirAll: *d.MkdirAll, dirPerm: os.FileMode(d.DirPerm)},
 		})
 	}
 	return acts, nil
@@ -141,5 +158,5 @@ func (copyHandler) Diff(desired Desired, observed Observed) ([]Action, error) {
 
 func (copyHandler) Apply(_ context.Context, a Action) error {
 	p := a.Payload.(filePayload)
-	return sys.WriteFileAtomic(p.path, p.content, p.mode)
+	return sys.WriteFileAtomicWithOptions(p.path, p.content, p.mode, p.mkdirAll, p.dirPerm)
 }

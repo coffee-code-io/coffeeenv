@@ -28,9 +28,18 @@ func HashBytes(b []byte) string {
 // WriteFileAtomic writes content to path via a temp file + rename, creating
 // parent directories as needed.
 func WriteFileAtomic(path string, content []byte, mode os.FileMode) error {
+	return WriteFileAtomicWithOptions(path, content, mode, true, 0o755)
+}
+
+func WriteFileAtomicWithOptions(path string, content []byte, mode os.FileMode, mkdirAll bool, dirPerm os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+	if mkdirAll {
+		if err := os.MkdirAll(dir, dirPerm); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, dirPerm); err != nil {
+			return err
+		}
 	}
 	tmp, err := os.CreateTemp(dir, ".coffeeenv-*")
 	if err != nil {

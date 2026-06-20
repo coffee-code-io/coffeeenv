@@ -69,6 +69,36 @@ func TestCopyHandler(t *testing.T) {
 // TestCopyHandlerSkipsMetadata: a copy never installs coffeeenv-internal
 // scaffolding (cue.mod/, manifest.json, coffeeenv.lock.json) — so a pulled skill
 // dir copies only its real content.
+func TestCopyHandlerPermOverride(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	mustWrite(t, filepath.Join(src, "tool"), "tool")
+
+	h := copyHandler{}
+	d, err := h.Decode(RawState{Type: "copy", Name: "k", Params: map[string]any{"src": src, "dst": dst, "perm": float64(0o755)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := h.Read(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acts, err := h.Diff(d, obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acts) != 1 {
+		t.Fatalf("want one action, got %d", len(acts))
+	}
+	if err := h.Apply(context.Background(), acts[0]); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(dst, "tool")); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("file perm = %v, %v; want 0755", info, err)
+	}
+}
+
 func TestCopyHandlerSkipsMetadata(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")

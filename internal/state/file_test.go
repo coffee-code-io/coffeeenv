@@ -1,6 +1,9 @@
 package state
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -66,6 +69,50 @@ func TestEnvExpandRoundTrip(t *testing.T) {
 	// A normal var stays single-quoted literal.
 	if quoteShell(envVar{Value: "nvim"}) != `'nvim'` {
 		t.Errorf("literal render = %s", quoteShell(envVar{Value: "nvim"}))
+	}
+}
+
+func TestFileModeTakesPrecedenceOverPerm(t *testing.T) {
+	d := decodeFile(t, map[string]any{
+		"path":    "/tmp/x",
+		"content": "hi",
+		"mode":    float64(0o600),
+		"perm":    float64(0o644),
+	})
+	if d.Mode != 0o600 {
+		t.Fatalf("mode = %#o, want 0600", d.Mode)
+	}
+}
+
+func TestFilePermAndDirPerm(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nested", "x")
+	d := decodeFile(t, map[string]any{
+		"path":     path,
+		"content":  "hi",
+		"perm":     float64(0o600),
+		"dir_perm": float64(0o700),
+	})
+	h := fileHandler{}
+	obs, err := h.Read(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acts, err := h.Diff(d, obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acts) != 1 {
+		t.Fatalf("want one action, got %d", len(acts))
+	}
+	if err := h.Apply(context.Background(), acts[0]); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("file perm = %v, %v; want 0600", info, err)
+	}
+	if info, err := os.Stat(filepath.Dir(path)); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("dir perm = %v, %v; want 0700", info, err)
 	}
 }
 

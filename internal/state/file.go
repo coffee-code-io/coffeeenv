@@ -19,11 +19,14 @@ func init() { Register(&fileHandler{}) }
 type fileHandler struct{}
 
 type fileDesired struct {
-	Path    string         `json:"path"`
-	Content *string        `json:"content"`
-	Data    map[string]any `json:"data"`
-	Format  string         `json:"format"`
-	Mode    uint32         `json:"mode"`
+	Path     string         `json:"path"`
+	Content  *string        `json:"content"`
+	Data     map[string]any `json:"data"`
+	Format   string         `json:"format"`
+	Mode     uint32         `json:"mode"`
+	Perm     uint32         `json:"perm"`
+	MkdirAll *bool          `json:"mkdir_all"`
+	DirPerm  uint32         `json:"dir_perm"`
 
 	rendered []byte // final bytes, computed in Decode
 }
@@ -46,7 +49,17 @@ func (fileHandler) Decode(rs RawState) (Desired, error) {
 		return nil, errors.New("file: path is required")
 	}
 	if p.Mode == 0 {
+		p.Mode = p.Perm
+	}
+	if p.Mode == 0 {
 		p.Mode = 0o644
+	}
+	if p.MkdirAll == nil {
+		mkdirAll := true
+		p.MkdirAll = &mkdirAll
+	}
+	if p.DirPerm == 0 {
+		p.DirPerm = 0o755
 	}
 
 	switch {
@@ -112,7 +125,7 @@ func (fileHandler) Diff(desired Desired, observed Observed) ([]Action, error) {
 	wantHash := sys.HashBytes(d.rendered)
 	wantMode := os.FileMode(d.Mode)
 
-	payload := filePayload{path: o.AbsPath, content: d.rendered, mode: wantMode}
+	payload := filePayload{path: o.AbsPath, content: d.rendered, mode: wantMode, mkdirAll: *d.MkdirAll, dirPerm: os.FileMode(d.DirPerm)}
 	switch {
 	case !o.Exists:
 		return []Action{{StateName: d.Path, Kind: "write-file",
@@ -130,11 +143,13 @@ func (fileHandler) Diff(desired Desired, observed Observed) ([]Action, error) {
 
 func (fileHandler) Apply(_ context.Context, a Action) error {
 	p := a.Payload.(filePayload)
-	return sys.WriteFileAtomic(p.path, p.content, p.mode)
+	return sys.WriteFileAtomicWithOptions(p.path, p.content, p.mode, p.mkdirAll, p.dirPerm)
 }
 
 type filePayload struct {
-	path    string
-	content []byte
-	mode    os.FileMode
+	path     string
+	content  []byte
+	mode     os.FileMode
+	mkdirAll bool
+	dirPerm  os.FileMode
 }

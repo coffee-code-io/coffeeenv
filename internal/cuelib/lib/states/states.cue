@@ -62,28 +62,35 @@ package states
 	prefix?: string
 }
 
-// #FileState writes a file with exact content and mode. path may use ~ and
-// ${VAR}, expanded by the Go layer. Content is either a literal `content`
+// #FileState writes a file with exact content and permissions. path may use ~
+// and ${VAR}, expanded by the Go layer. Content is either a literal `content`
 // string, or a structured `data` subtree rendered by the Go layer in `format`
-// (json/toml/yaml).
+// (json/toml/yaml). mkdir_all creates parent directories with dir_perm.
 #FileState: {
-	type:     "file"
-	order:    int | *50
-	path:     string
-	mode:     int | *0o644
-	content?: string
-	data?: {...}
-	format?: "json" | "toml" | "yaml"
+	type:      "file"
+	order:     int | *50
+	path:      string
+	mode?:     int
+	perm:      int | *0o644
+	mkdir_all: bool | *true
+	dir_perm:  int | *0o755
+	content?:  string
+	data?:     {...}
+	format?:   "json" | "toml" | "yaml"
 }
 
 // #CopyState recursively copies a filesystem tree from src into dst at apply
 // time. Used for path-sourced skills/jobs (`files: "<path>"`). A relative src is
-// resolved against the chart directory by the Go layer.
+// resolved against the chart directory by the Go layer. perm overrides source
+// file permissions when set. mkdir_all creates parent directories with dir_perm.
 #CopyState: {
-	type:  "copy"
-	order: int | *50
-	src:   string
-	dst:   string
+	type:      "copy"
+	order:     int | *50
+	src:       string
+	dst:       string
+	perm?:     int
+	mkdir_all: bool | *true
+	dir_perm:  int | *0o755
 }
 
 // #EnvState manages one environment variable in a managed export file. target
