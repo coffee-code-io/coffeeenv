@@ -83,6 +83,7 @@ import (
 							if m.args != _|_ {args: m.args}
 							if m.env != _|_ {env: m.env}
 							if m.url != _|_ {url: m.url}
+							if m.transport != _|_ {transport: m.transport}
 						}
 					}
 				}

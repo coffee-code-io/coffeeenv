@@ -25,13 +25,16 @@ package agent
 	files:        string | {[string]: string} | *{}
 }
 
-// #MCP is an agent-agnostic MCP server spec (command- or url-based).
+// #MCP is an agent-agnostic MCP server spec. Local stdio servers use
+// command/args/env; server-hosted MCPs use url and optionally transport (for
+// example "streamable-http" or "sse").
 #MCP: {
 	name?: string
 	command?: string
 	args?: [...string]
 	env?: {[string]: string}
 	url?: string
+	transport?: string
 }
 
 // #PiExtension is a pi.dev integration (only the pi target renders these — it is

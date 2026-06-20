@@ -228,3 +228,47 @@ agent: skills: docs: {files: "./skilldir"}
 		t.Errorf("dst = %q", dst)
 	}
 }
+
+func TestCopyStateFromDependencyUsesDependencyDir(t *testing.T) {
+	root := t.TempDir()
+	mainDir := filepath.Join(root, "main")
+	depDir := filepath.Join(root, "dep")
+	if err := os.MkdirAll(mainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(depDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(mainDir, "env.cue"), `package env
+import dep "example.com/dep"
+dep.#Main
+`)
+	writeFile(t, filepath.Join(depDir, "env.cue"), `package dep
+import "coffeeenv.dev/lib/agent/pi"
+#Main: {
+	pi.#Main
+	agent: extensions: helper: {files: "files/helper"}
+}
+`)
+	if err := os.MkdirAll(filepath.Join(depDir, "files", "helper"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(depDir, "files", "helper", "main.py"), "hi")
+
+	raws, err := EvalStates(mainDir, Opts{
+		Engine: "global",
+		Root:   "~",
+		Deps:   map[string]string{"example.com/dep": depDir},
+	})
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	cp, ok := byName(raws)["pi-extension-helper-files"]
+	if !ok {
+		t.Fatalf("missing copy state; got %v", names(raws))
+	}
+	want := filepath.Join(depDir, "files", "helper")
+	if src, _ := cp.Params["src"].(string); src != want {
+		t.Errorf("src = %q, want %q", src, want)
+	}
+}

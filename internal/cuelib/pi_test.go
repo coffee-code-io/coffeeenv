@@ -94,6 +94,48 @@ func TestPiGlobal(t *testing.T) {
 	}
 }
 
+func TestPiHostedMcp(t *testing.T) {
+	dir := t.TempDir()
+	chart := `package env
+
+import "coffeeenv.dev/lib/agent/pi"
+
+#Main: {
+	pi.#Main
+	agent: mcps: slack: {
+		transport: "streamable-http"
+		url:       "https://mcp.slack.com/mcp"
+	}
+}
+
+#Main
+`
+	if err := os.WriteFile(filepath.Join(dir, "env.cue"), []byte(chart), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raws, err := EvalStates(dir, Opts{Engine: "global", Root: "~"})
+	if err != nil {
+		t.Fatalf("EvalStates: %v", err)
+	}
+	m := byName(raws)
+	mcp, ok := m["pi-mcp"]
+	if !ok {
+		t.Fatalf("missing pi-mcp; got %v", names(raws))
+	}
+	data, _ := mcp.Params["data"].(map[string]any)
+	servers, _ := data["mcpServers"].(map[string]any)
+	slack, _ := servers["slack"].(map[string]any)
+	if slack == nil {
+		t.Fatalf("missing slack MCP server; data=%#v", data)
+	}
+	if got, _ := slack["transport"].(string); got != "streamable-http" {
+		t.Errorf("transport = %q, want streamable-http", got)
+	}
+	if got, _ := slack["url"].(string); got != "https://mcp.slack.com/mcp" {
+		t.Errorf("url = %q", got)
+	}
+}
+
 // TestPiNoMcp: a pi chart with no MCP servers gets neither mcp.json nor the
 // adapter package.
 func TestPiNoMcp(t *testing.T) {

@@ -3,6 +3,7 @@ package cuelib
 import (
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -180,7 +181,7 @@ func Resolve(chartDir string, opts Opts, given map[string]string, prompt PromptF
 	if err != nil {
 		return Result{}, err
 	}
-	resolveCopySrc(raws, chartDir)
+	resolveCopySrc(raws, statesV, chartDir, opts.Deps)
 	return Result{Values: values, States: raws}, nil
 }
 
@@ -278,9 +279,11 @@ func validateLeaves(ctx *cue.Context, base cue.Value, inputs map[string]inputSpe
 }
 
 // resolveCopySrc rewrites each copy state's relative `src` to an absolute path
-// anchored at the chart directory, so a `files: "./skills/x"` in a chart
-// resolves regardless of the apply layer's working directory.
-func resolveCopySrc(raws []state.RawState, chartDir string) {
+// anchored at the chart directory that supplied the src value. For dependency
+// charts, CUE source positions point at the mounted cue.mod/pkg/<module>/...
+// overlay; map that back to the pulled dependency directory so bundled files
+// are copied from the dependency, not the importing chart.
+func resolveCopySrc(raws []state.RawState, statesV cue.Value, chartDir string, deps map[string]string) {
 	base, err := filepath.Abs(chartDir)
 	if err != nil {
 		return
@@ -293,8 +296,58 @@ func resolveCopySrc(raws []state.RawState, chartDir string) {
 		if src == "" || filepath.IsAbs(src) || strings.HasPrefix(src, "~") {
 			continue
 		}
-		raws[i].Params["src"] = filepath.Join(base, src)
+		srcBase := copySrcBase(raws[i], i, statesV, base, deps)
+		if _, err := os.Stat(filepath.Join(srcBase, src)); err != nil {
+			if depBase, ok := depBaseWithCopySrc(src, deps); ok {
+				srcBase = depBase
+			}
+		}
+		raws[i].Params["src"] = filepath.Join(srcBase, src)
 	}
+}
+
+func copySrcBase(rs state.RawState, index int, statesV cue.Value, chartBase string, deps map[string]string) string {
+	path := cue.MakePath(cue.Index(index), cue.Str("src"))
+	if rs.Name != "" {
+		path = cue.MakePath(cue.Str(rs.Name), cue.Str("src"))
+	}
+	v := statesV.LookupPath(path)
+	if !v.Exists() {
+		return chartBase
+	}
+	filename := v.Pos().Filename()
+	if filename == "" {
+		return chartBase
+	}
+	for module, dir := range deps {
+		depBase, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		overlayBase := filepath.Join(chartBase, "cue.mod", "pkg", filepath.FromSlash(module))
+		if filename == overlayBase || strings.HasPrefix(filename, overlayBase+string(os.PathSeparator)) {
+			return depBase
+		}
+	}
+	return chartBase
+}
+
+func depBaseWithCopySrc(src string, deps map[string]string) (string, bool) {
+	var match string
+	for _, dir := range deps {
+		depBase, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(depBase, src)); err != nil {
+			continue
+		}
+		if match != "" {
+			return "", false
+		}
+		match = depBase
+	}
+	return match, match != ""
 }
 
 // resolveDynamicMap interactively grows a @inputMap field: prompt for a key,
