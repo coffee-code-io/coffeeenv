@@ -58,6 +58,8 @@ _explain: """
 	// instead of the whole repo — for monorepos. Each becomes its own `lsp:<dir>`
 	// job; empty means a single `lsp` job over the whole repo.
 	lspDirs: string @input("LSP subdirectories for a monorepo (comma-separated, empty = whole repo)", order=3)
+	// Optional embedding vector dimensions. "auto" means use the model default.
+	embedDimensions: int | *"auto"
 	// Multi-select from the registered skills/jobs (agent.skills / coffeectx.jobs).
 	skills: [...string] @multichoice("Enable skills", from=agent.skills, order=4)
 	jobs: [...string] @multichoice("Enable jobs", from=coffeectx.jobs, order=5)
@@ -244,7 +246,12 @@ _explain: """
 					db:       "\(_home)/.coffeecode/db/\(k).db"
 					repoPath: p.repoPath
 					enabled:  true
-					core: embed: auth: _embedAuth & {model: coffeectx.embeddingsModel}
+					core: embed: {
+						auth: _embedAuth & {model: coffeectx.embeddingsModel}
+						if (p.embedDimensions & int) != _|_ {
+							dimensions: p.embedDimensions
+						}
+					}
 					agent: auth: _mainAuth & {model:        coffeectx.uiModel}
 					mcp: tools: {search: true, exact: true, regex: true, raw_query: true, load_node: true, insert: false}
 

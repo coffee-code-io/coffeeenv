@@ -43,20 +43,21 @@ func TestCoffeectxInstall(t *testing.T) {
 // generates ~/.coffeecode/config.yaml plus the pi extension.
 func TestCoffeectxSetup(t *testing.T) {
 	given := map[string]string{
-		"coffeectx.projects.myrepo.repoPath": "/home/me/repo",
-		"coffeectx.projects.myrepo.language": "typescript",
-		"coffeectx.projects.myrepo.lspDirs":  "",
-		"coffeectx.projects.myrepo.skills":   "api,contract",
-		"coffeectx.projects.myrepo.jobs":     "reindex",
-		"coffeectx.authType":                 "apiKey",
-		"coffeectx.provider":                 "", // empty -> custom url path
-		"coffeectx.url":                      "https://api.example.com",
-		"coffeectx.apiKey":                   "sk-test",
-		"coffeectx.embeddingsModel":          "embed-1",
-		"coffeectx.indexerModel":             "index-1",
-		"coffeectx.uiModel":                  "ui-1",
-		"coffeectx.active":                   "myrepo",
-		"coffeectx.autolaunch":               "true",
+		"coffeectx.projects.myrepo.repoPath":        "/home/me/repo",
+		"coffeectx.projects.myrepo.language":        "typescript",
+		"coffeectx.projects.myrepo.lspDirs":         "",
+		"coffeectx.projects.myrepo.embedDimensions": "4096",
+		"coffeectx.projects.myrepo.skills":          "api,contract",
+		"coffeectx.projects.myrepo.jobs":            "reindex",
+		"coffeectx.authType":                        "apiKey",
+		"coffeectx.provider":                        "", // empty -> custom url path
+		"coffeectx.url":                             "https://api.example.com",
+		"coffeectx.apiKey":                          "sk-test",
+		"coffeectx.embeddingsModel":                 "embed-1",
+		"coffeectx.indexerModel":                    "index-1",
+		"coffeectx.uiModel":                         "ui-1",
+		"coffeectx.active":                          "myrepo",
+		"coffeectx.autolaunch":                      "true",
 	}
 	r, err := Resolve(exampleDir("coffeectx-setup"), Opts{Engine: "global", Root: "~", OS: "darwin"}, given, nil)
 	if err != nil {
@@ -85,6 +86,24 @@ func TestCoffeectxSetup(t *testing.T) {
 	}
 	if got, _ := data["active"].(string); got != "myrepo" {
 		t.Errorf("config active = %v, want myrepo", got)
+	}
+	core, _ := myrepo["core"].(map[string]any)
+	embed, _ := core["embed"].(map[string]any)
+	switch got := embed["dimensions"].(type) {
+	case int64:
+		if got != 4096 {
+			t.Errorf("embed dimensions = %v, want 4096", got)
+		}
+	case int:
+		if got != 4096 {
+			t.Errorf("embed dimensions = %v, want 4096", got)
+		}
+	case float64:
+		if got != 4096 {
+			t.Errorf("embed dimensions = %v, want 4096", got)
+		}
+	default:
+		t.Errorf("embed dimensions = %#v (%T), want 4096", got, got)
 	}
 
 	// The @multichoice skills value "api,contract" is injected as a CUE list.
@@ -160,8 +179,8 @@ func TestCoffeectxSetup(t *testing.T) {
 
 	// Embedding auth: an AuthSettings block under core.embed.auth with the
 	// embeddings model and shared credential.
-	core, _ := myrepo["core"].(map[string]any)
-	embed, _ := core["embed"].(map[string]any)
+	core, _ = myrepo["core"].(map[string]any)
+	embed, _ = core["embed"].(map[string]any)
 	embedAuth, _ := embed["auth"].(map[string]any)
 	if got, _ := embedAuth["authType"].(string); got != "apiKey" {
 		t.Errorf("embed auth.authType = %v", got)
