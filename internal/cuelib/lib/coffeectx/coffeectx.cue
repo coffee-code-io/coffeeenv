@@ -52,9 +52,13 @@ _explain: """
 #Project: {
 	repoPath: string @input("Repo path", order=1)
 	language: string @input("Language for the LSP job (empty for none)", order=2)
+	// Comma-separated subdirectories (relative to repoPath) to index with the LSP
+	// instead of the whole repo — for monorepos. Each becomes its own `lsp:<dir>`
+	// job; empty means a single `lsp` job over the whole repo.
+	lspDirs: string @input("LSP subdirectories for a monorepo (comma-separated, empty = whole repo)", order=3)
 	// Multi-select from the registered skills/jobs (agent.skills / coffeectx.jobs).
-	skills: [...string] @multichoice("Enable skills", from=agent.skills, order=3)
-	jobs: [...string] @multichoice("Enable jobs", from=coffeectx.jobs, order=4)
+	skills: [...string] @multichoice("Enable skills", from=agent.skills, order=4)
+	jobs: [...string] @multichoice("Enable jobs", from=coffeectx.jobs, order=5)
 }
 
 // #McpNS is the minimal `coffeectx` namespace used by #Mcp: just any registered
@@ -267,7 +271,18 @@ _explain: """
 					jobs: "span-link": {enabled: true}
 
 					if p.language != "" {
-						jobs: lsp: {enabled: true, parameters: {lspCommand: _lspAvail[p.language].command}}
+						// Trimmed, non-empty subdirectories from the comma-separated input.
+						let _lspDirs = [for d in strings.Split(p.lspDirs, ",") for t in [strings.TrimSpace(d)] if t != "" {t}]
+						// No subdirs: a single lsp job over the whole repo.
+						if len(_lspDirs) == 0 {
+							jobs: lsp: {enabled: true, parameters: {lspCommand: _lspAvail[p.language].command}}
+						}
+						// Monorepo: one lsp:<dir> job per subdirectory, each scoped to its
+						// absolute path (coffeectx resolves repoPath; relative would be
+						// cwd-relative, so join to the project repoPath).
+						for d in _lspDirs {
+							jobs: "lsp:\(d)": {enabled: true, parameters: {lspCommand: _lspAvail[p.language].command, repoPath: "\(p.repoPath)/\(d)"}}
+						}
 					}
 					if len(p.skills) > 0 {
 						skills: jobs: include: p.skills

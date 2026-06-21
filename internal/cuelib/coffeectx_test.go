@@ -45,6 +45,7 @@ func TestCoffeectxSetup(t *testing.T) {
 	given := map[string]string{
 		"coffeectx.projects.myrepo.repoPath": "/home/me/repo",
 		"coffeectx.projects.myrepo.language": "typescript",
+		"coffeectx.projects.myrepo.lspDirs":  "",
 		"coffeectx.projects.myrepo.skills":   "api,contract",
 		"coffeectx.projects.myrepo.jobs":     "reindex",
 		"coffeectx.authType":                 "apiKey",
@@ -211,4 +212,64 @@ func TestCoffeectxSetup(t *testing.T) {
 	if _, ok := m["coffeectx-launchd"]; !ok {
 		t.Errorf("autolaunch on darwin should emit the launchd plist; got %v", names(r.States))
 	}
+}
+
+// TestCoffeectxLspMonorepo: a project with lspDirs emits one `lsp:<dir>` job per
+// subdirectory (each scoped to its absolute path) and no whole-repo `lsp` job.
+func TestCoffeectxLspMonorepo(t *testing.T) {
+	given := map[string]string{
+		"coffeectx.projects.mono.repoPath": "/home/me/mono",
+		"coffeectx.projects.mono.language": "typescript",
+		"coffeectx.projects.mono.lspDirs":  "frontend, backend",
+		"coffeectx.projects.mono.skills":   "",
+		"coffeectx.projects.mono.jobs":     "",
+		"coffeectx.authType":               "apiKey",
+		"coffeectx.provider":               "openrouter",
+		"coffeectx.apiKey":                 "sk-x",
+		"coffeectx.embeddingsModel":        "e",
+		"coffeectx.indexerModel":           "i",
+		"coffeectx.uiModel":                "u",
+		"coffeectx.active":                 "mono",
+		"coffeectx.autolaunch":             "false",
+	}
+	r, err := Resolve(exampleDir("coffeectx-setup"), Opts{Engine: "global", Root: "~", OS: "darwin"}, given, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	m := byName(r.States)
+	data, _ := m["coffeecode-config"].Params["data"].(map[string]any)
+	projects, _ := data["projects"].(map[string]any)
+	mono, _ := projects["mono"].(map[string]any)
+	jobs, _ := mono["jobs"].(map[string]any)
+
+	if _, ok := jobs["lsp"]; ok {
+		t.Errorf("monorepo project should not emit a whole-repo lsp job; jobs=%v", keysOf(jobs))
+	}
+	for dir, wantPath := range map[string]string{
+		"frontend": "/home/me/mono/frontend",
+		"backend":  "/home/me/mono/backend",
+	} {
+		job, ok := jobs["lsp:"+dir].(map[string]any)
+		if !ok {
+			t.Fatalf("missing lsp:%s job; jobs=%v", dir, keysOf(jobs))
+		}
+		if job["enabled"] != true {
+			t.Errorf("lsp:%s should be enabled", dir)
+		}
+		params, _ := job["parameters"].(map[string]any)
+		if got, _ := params["repoPath"].(string); got != wantPath {
+			t.Errorf("lsp:%s repoPath = %q, want %q", dir, got, wantPath)
+		}
+		if got, _ := params["lspCommand"].(string); got != "typescript-language-server --stdio" {
+			t.Errorf("lsp:%s lspCommand = %q", dir, got)
+		}
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
 }
