@@ -24,6 +24,7 @@ const (
 	KindChoose                       // single-select from a fixed option set
 	KindMultichoice                  // multi-select from a fixed option set -> a list
 	KindConfirm                      // yes/no
+	KindNotice                       // print-only: no value collected (returned string ignored)
 )
 
 // Input is a chart field the resolver needs a value for. Name is the field's CUE
@@ -68,6 +69,9 @@ type inputSpec struct {
 	kind   InputKind
 	from   string
 	static []string
+	// noneLabel, when set on a @choose, adds a leading opt-out option; selecting
+	// it resolves the field to "" (e.g. "(no LSP)").
+	noneLabel string
 }
 
 func (s inputSpec) toInput(opts []string) Input {
@@ -156,7 +160,7 @@ func Resolve(chartDir string, opts Opts, given map[string]string, prompt PromptF
 		if err != nil {
 			return Result{}, err
 		}
-		values[spec.name] = val
+		values[spec.name] = noneToEmpty(*spec, val)
 	}
 
 	// Final validation over the statically-discovered leaves.
@@ -209,10 +213,25 @@ func buildSteps(inputs map[string]inputSpec, dynMaps []DynMap) []step {
 // buildOptions computes the option set for a choose/multichoice input: the keys
 // of the `from` registry (resolved against cur) or the static disjunction set.
 func buildOptions(cur cue.Value, spec inputSpec) []string {
+	var opts []string
 	if spec.from != "" {
-		return keysOrElems(cur.LookupPath(cue.ParsePath(spec.from)))
+		opts = keysOrElems(cur.LookupPath(cue.ParsePath(spec.from)))
+	} else {
+		opts = spec.static
 	}
-	return spec.static
+	// A @choose opt-out is offered first and resolves to "" when picked.
+	if spec.noneLabel != "" && spec.kind == KindChoose {
+		opts = append([]string{spec.noneLabel}, opts...)
+	}
+	return opts
+}
+
+// noneToEmpty maps a chosen value equal to the spec's none label back to "".
+func noneToEmpty(spec inputSpec, val string) string {
+	if spec.noneLabel != "" && val == spec.noneLabel {
+		return ""
+	}
+	return val
 }
 
 // keysOrElems returns a struct's field names or a list's string elements.
@@ -350,15 +369,55 @@ func depBaseWithCopySrc(src string, deps map[string]string) (string, bool) {
 	return match, match != ""
 }
 
-// resolveDynamicMap interactively grows a @inputMap field: prompt for a key,
-// resolve that entry's nested inputs, then ask whether to add another. With a
-// nil PromptFunc (non-interactive) keys come from `given`/--value, so there is
+// resolveDynamicMap interactively resolves a @inputMap field. It first walks the
+// entries that already exist (from given values or the chart) — filling only each
+// one's missing fields, and noting the ones already complete — then, if the map
+// is open, offers to add more. A closed map gets no add-more prompt. With a nil
+// PromptFunc (non-interactive) keys/fields come from `given`/--value, so there is
 // nothing to do here.
 func resolveDynamicMap(ctx *cue.Context, base cue.Value, dm DynMap, pathOf map[string]cue.Path, values map[string]string, prompt PromptFunc) error {
 	if prompt == nil {
 		return nil
 	}
 	label := leafLabel(dm.Name)
+
+	cur, err := fillValues(ctx, base, values, pathOf)
+	if err != nil {
+		return err
+	}
+	mapField := cur.LookupPath(dm.Path)
+	existing := mapKeys(mapField)
+
+	// 1. Existing entries first: complete the partial ones, list the done ones.
+	for _, key := range existing {
+		entry := cue.MakePath(append(dm.Path.Selectors(), cue.Str(key))...)
+		if entryHasUnresolved(ctx, base, entry, pathOf, values) {
+			notify(prompt, fmt.Sprintf("Configuring %s %q:", label, key))
+		} else {
+			notify(prompt, fmt.Sprintf("%s %q — already set up", label, key))
+		}
+		if err := resolveEntry(ctx, base, entry, pathOf, values, prompt); err != nil {
+			return err
+		}
+	}
+
+	// 2. Closed map: no further entries allowed.
+	if !mapField.Allows(cue.AnyString) {
+		return nil
+	}
+
+	// 3. With existing entries, confirm before growing the map.
+	if len(existing) > 0 {
+		ans, err := prompt(Input{Name: dm.Name, Prompt: fmt.Sprintf("Add another %s?", label), Kind: KindConfirm})
+		if err != nil {
+			return err
+		}
+		if !isYes(ans) {
+			return nil
+		}
+	}
+
+	// 4. Grow the map: prompt for new keys until the user stops.
 	for {
 		key, err := prompt(Input{Name: dm.Name, Prompt: fmt.Sprintf("%s (leave empty to finish):", dm.Prompt), Kind: KindText})
 		if err != nil {
@@ -380,6 +439,65 @@ func resolveDynamicMap(ctx *cue.Context, base cue.Value, dm DynMap, pathOf map[s
 			return nil
 		}
 	}
+}
+
+// mapKeys returns the sorted field names present in a struct value (the existing
+// entries of a @inputMap), or nil if it has none / is not a struct.
+func mapKeys(v cue.Value) []string {
+	if !v.Exists() {
+		return nil
+	}
+	it, err := v.Fields()
+	if err != nil {
+		return nil
+	}
+	var keys []string
+	for it.Next() {
+		sel := it.Selector()
+		if sel.IsString() {
+			keys = append(keys, sel.Unquoted())
+		} else {
+			keys = append(keys, sel.String())
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// entryHasUnresolved reports whether a map entry still has any promptable input
+// field that is neither given nor concrete (i.e. resolveEntry would prompt).
+func entryHasUnresolved(ctx *cue.Context, base cue.Value, entry cue.Path, pathOf map[string]cue.Path, values map[string]string) bool {
+	cur, err := fillValues(ctx, base, values, pathOf)
+	if err != nil {
+		return false
+	}
+	probe := cur.FillPath(entry, ctx.CompileString("{}"))
+	elem := probe.LookupPath(entry)
+	if !elem.Exists() {
+		return false
+	}
+	inputs := map[string]inputSpec{}
+	var leaves []leaf
+	scanValue(elem, entry.Selectors(), inputs, &leaves, nil)
+	for _, lf := range leaves {
+		spec, ok := inputs[lf.name]
+		if !ok {
+			continue
+		}
+		if _, given := values[lf.name]; given {
+			continue
+		}
+		if !inputResolved(probe, spec) {
+			return true
+		}
+	}
+	return false
+}
+
+// notify emits a print-only line through the prompt (KindNotice), ignoring the
+// returned value and any error (display is best-effort).
+func notify(prompt PromptFunc, msg string) {
+	_, _ = prompt(Input{Prompt: msg, Kind: KindNotice})
 }
 
 // resolveEntry resolves every input (and any nested @inputMap) under a single
@@ -429,7 +547,7 @@ func resolveEntry(ctx *cue.Context, base cue.Value, entry cue.Path, pathOf map[s
 			if err != nil {
 				return err
 			}
-			values[next.name] = val
+			values[next.name] = noneToEmpty(next, val)
 			continue
 		}
 
@@ -565,6 +683,7 @@ func scanValue(v cue.Value, sels []cue.Selector, inputs map[string]inputSpec, le
 		inputs[name] = inputSpec{
 			name: name, path: path, prompt: prompt, order: attrOrder(attr),
 			kind: KindChoose, from: attrStr(attr, "from"), static: disjunctOptions(v),
+			noneLabel: attrStr(attr, "none"),
 		}
 		return
 	}

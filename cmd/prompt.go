@@ -34,6 +34,10 @@ func interactivePrompt(in cuelib.Input) (string, error) {
 		}
 		return strings.Join(out, ","), nil
 
+	case cuelib.KindNotice:
+		fmt.Println(in.Prompt)
+		return "", nil
+
 	case cuelib.KindConfirm:
 		var ok bool
 		if err := survey.AskOne(&survey.Confirm{Message: in.Prompt}, &ok); err != nil {

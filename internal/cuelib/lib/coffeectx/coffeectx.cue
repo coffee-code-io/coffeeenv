@@ -51,7 +51,9 @@ _explain: """
 // enable lists.
 #Project: {
 	repoPath: string @input("Repo path", order=1)
-	language: string @input("Language for the LSP job (empty for none)", order=2)
+	// A choice restricted to the registered LSP servers (lsp.available); the
+	// "(no LSP)" option maps to empty (no LSP job for this project).
+	language: string @choose("Language for the LSP server", from=lsp.available, none="(no LSP)", order=2)
 	// Comma-separated subdirectories (relative to repoPath) to index with the LSP
 	// instead of the whole repo — for monorepos. Each becomes its own `lsp:<dir>`
 	// job; empty means a single `lsp` job over the whole repo.
