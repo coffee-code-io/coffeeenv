@@ -114,6 +114,7 @@ package states
 	dst:       string
 	soft:      bool | *true
 	force:     bool | *true
+	sudo:      bool | *false
 	mkdir_all: bool | *true
 	dir_perm:  int | *0o755
 }

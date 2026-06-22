@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/coffee-code-io/coffeeenv/internal/sys"
@@ -20,6 +21,7 @@ type lnDesired struct {
 	Dst      string `json:"dst"`
 	Soft     *bool  `json:"soft"`
 	Force    *bool  `json:"force"`
+	Sudo     *bool  `json:"sudo"`
 	MkdirAll *bool  `json:"mkdir_all"`
 	DirPerm  uint32 `json:"dir_perm"`
 }
@@ -36,6 +38,7 @@ type lnPayload struct {
 	dst      string
 	soft     bool
 	force    bool
+	sudo     bool
 	mkdirAll bool
 	dirPerm  os.FileMode
 }
@@ -57,6 +60,10 @@ func (lnHandler) Decode(rs RawState) (Desired, error) {
 	if p.Force == nil {
 		force := true
 		p.Force = &force
+	}
+	if p.Sudo == nil {
+		sudo := false
+		p.Sudo = &sudo
 	}
 	if p.MkdirAll == nil {
 		mkdirAll := true
@@ -122,12 +129,31 @@ func (lnHandler) Diff(desired Desired, observed Observed) ([]Action, error) {
 		StateName: d.Dst,
 		Kind:      "link",
 		Summary:   fmt.Sprintf("%s %s -> %s", verb, o.DstAbs, o.SrcAbs),
-		Payload:   lnPayload{src: o.SrcAbs, dst: o.DstAbs, soft: *d.Soft, force: *d.Force, mkdirAll: *d.MkdirAll, dirPerm: os.FileMode(d.DirPerm)},
+		Payload:   lnPayload{src: o.SrcAbs, dst: o.DstAbs, soft: *d.Soft, force: *d.Force, sudo: *d.Sudo, mkdirAll: *d.MkdirAll, dirPerm: os.FileMode(d.DirPerm)},
 	}}, nil
 }
 
 func (lnHandler) Apply(_ context.Context, a Action) error {
 	p := a.Payload.(lnPayload)
+	if p.sudo {
+		if p.mkdirAll {
+			if err := exec.Command("sudo", "mkdir", "-p", filepath.Dir(p.dst)).Run(); err != nil {
+				return err
+			}
+			if err := exec.Command("sudo", "chmod", fmt.Sprintf("%#o", p.dirPerm), filepath.Dir(p.dst)).Run(); err != nil {
+				return err
+			}
+		}
+		args := []string{}
+		if p.soft {
+			args = append(args, "-s")
+		}
+		if p.force {
+			args = append(args, "-f")
+		}
+		args = append(args, p.src, p.dst)
+		return exec.Command("sudo", append([]string{"ln"}, args...)...).Run()
+	}
 	if p.mkdirAll {
 		if err := os.MkdirAll(filepath.Dir(p.dst), p.dirPerm); err != nil {
 			return err

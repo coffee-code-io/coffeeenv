@@ -16,6 +16,8 @@ import st "coffeeenv.dev/lib/states"
 
 #NS: {
 	font: string | *"monospace:size=11"
+	// Platform-specific charts must install foot and set this to true.
+	installed: bool
 	theme: #ThemeNS
 }
 
@@ -24,13 +26,9 @@ import st "coffeeenv.dev/lib/states"
 	terminal: foot: theme: available: #CatppuccinFootThemes
 
 	_foot: terminal.foot
+	_footInstalled: _foot.installed & true
 
 	states: {
-		"foot-install": st.#ShellState & {
-			run:    "sudo apt-get update && sudo apt-get install -y foot"
-			unless: "command -v foot >/dev/null 2>&1"
-			order: 20
-		}
 		"foot-theme": st.#FileState & {
 			path:   "$HOME/.config/foot/themes/\(_foot.theme.active.file)"
 			format: "toml"
