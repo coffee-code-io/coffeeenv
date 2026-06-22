@@ -235,6 +235,61 @@ func TestCoffeectxSetup(t *testing.T) {
 
 // TestCoffeectxLspMonorepo: a project with lspDirs emits one `lsp:<dir>` job per
 // subdirectory (each scoped to its absolute path) and no whole-repo `lsp` job.
+func TestCoffeectxSetupUsesAbsoluteRoot(t *testing.T) {
+	given := map[string]string{
+		"coffeectx.projects.myrepo.repoPath":        "/home/me/repo",
+		"coffeectx.projects.myrepo.language":        "go",
+		"coffeectx.projects.myrepo.lspDirs":         "gateway",
+		"coffeectx.projects.myrepo.embedDimensions": "auto",
+		"coffeectx.projects.myrepo.skills":          "",
+		"coffeectx.projects.myrepo.jobs":            "",
+		"coffeectx.authType":                        "openai-oauth",
+		"coffeectx.embedProvider":                   "",
+		"coffeectx.embedUrl":                        "https://embed.example.com",
+		"coffeectx.embedApiKey":                     "embed-key",
+		"coffeectx.embeddingsModel":                 "embed-1",
+		"coffeectx.indexerModel":                    "index-1",
+		"coffeectx.uiModel":                         "ui-1",
+		"coffeectx.active":                          "myrepo",
+		"coffeectx.autolaunch":                      "true",
+	}
+	r, err := Resolve(exampleDir("coffeectx-setup"), Opts{Engine: "global", Root: "/home/me", OS: "linux"}, given, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	m := byName(r.States)
+	cfg := m["coffeecode-config"]
+	data, _ := cfg.Params["data"].(map[string]any)
+	projects, _ := data["projects"].(map[string]any)
+	myrepo, _ := projects["myrepo"].(map[string]any)
+	if got, _ := myrepo["db"].(string); got != "/home/me/.coffeecode/db/myrepo.db" {
+		t.Fatalf("db path = %q, want absolute home path", got)
+	}
+	if got, _ := data["types"].(map[string]any)["userDir"].(string); got != "/home/me/.coffeecode/types" {
+		t.Fatalf("types.userDir = %q, want absolute home path", got)
+	}
+	unit := m["coffeectx-systemd"]
+	if got, _ := unit.Params["path"].(string); got != "/home/me/.config/systemd/user/coffeectx.service" {
+		t.Fatalf("systemd unit path = %q, want absolute home path", got)
+	}
+	unitContent, _ := unit.Params["content"].(string)
+	if !strings.Contains(unitContent, "WorkingDirectory=/home/me") || !strings.Contains(unitContent, "ExecStart=/usr/bin/env bash -lc 'exec coffeectx daemonize'") {
+		t.Fatalf("systemd unit does not use absolute setup paths/content:\n%s", unitContent)
+	}
+	uiUnit := m["coffeectx-ui-systemd"]
+	if got, _ := uiUnit.Params["path"].(string); got != "/home/me/.config/systemd/user/coffeectx-ui.service" {
+		t.Fatalf("ui systemd unit path = %q, want absolute home path", got)
+	}
+	uiContent, _ := uiUnit.Params["content"].(string)
+	if !strings.Contains(uiContent, "WorkingDirectory=/home/me") || !strings.Contains(uiContent, "ExecStart=/usr/bin/env bash -lc 'exec coffeectx-ui'") {
+		t.Fatalf("ui systemd unit does not use absolute setup paths/content:\n%s", uiContent)
+	}
+	enable := m["coffeectx-systemd-enable"]
+	if got, _ := enable.Params["run"].(string); got != "systemctl --user enable --now coffeectx.service coffeectx-ui.service" {
+		t.Fatalf("systemd enable run = %q", got)
+	}
+}
+
 func TestCoffeectxLspMonorepo(t *testing.T) {
 	given := map[string]string{
 		"coffeectx.projects.mono.repoPath": "/home/me/mono",

@@ -7,9 +7,10 @@ package context
 import "time"
 
 // engine selects the install target: "global" (the real machine) or "local"
-// (a venv directory). root is the base path: "~" for global, the venv dir for
-// local. os is the host operating system (runtime.GOOS), injected by Go;
-// helpers branch on it to emit launchd vs systemd units.
+// (a venv directory). root is the base path: the absolute home directory for
+// global CLI runs, or the venv dir for local. os is the host operating system
+// (runtime.GOOS), injected by Go; helpers branch on it to emit launchd vs
+// systemd units.
 engine: "global" | "local" | *"global"
 root:   string | *"~"
 os:     string | *"darwin"

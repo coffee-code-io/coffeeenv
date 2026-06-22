@@ -212,6 +212,37 @@ _explain: """
 	_local: context.engine == "local"
 	_home:  context.root
 
+	_systemdUnitPath:   "\(_home)/.config/systemd/user/coffeectx.service"
+	_systemdUiUnitPath: "\(_home)/.config/systemd/user/coffeectx-ui.service"
+	_systemdUnit: """
+		[Unit]
+		Description=CoffeeCtx daemon
+		After=network.target
+
+		[Service]
+		WorkingDirectory=\(_home)
+		ExecStart=/usr/bin/env bash -lc 'exec coffeectx daemonize'
+		Restart=on-failure
+
+		[Install]
+		WantedBy=default.target
+
+		"""
+	_systemdUiUnit: """
+		[Unit]
+		Description=CoffeeCtx UI
+		After=network.target coffeectx.service
+
+		[Service]
+		WorkingDirectory=\(_home)
+		ExecStart=/usr/bin/env bash -lc 'exec coffeectx-ui'
+		Restart=on-failure
+
+		[Install]
+		WantedBy=default.target
+
+		"""
+
 	// Two AuthSettings builders (retrival-mcp packages/core/src/auth.ts): provider
 	// XOR url, each block adding its own model. _mainAuth drives the UI agent and
 	// jobs (openai-oauth carries only authType); _embedAuth is always apiKey since
@@ -393,14 +424,27 @@ _explain: """
 		}
 		if coffeectx.autolaunch if context.os == "linux" {
 			"coffeectx-systemd": st.#FileState & {
-				path:    _unitPath
-				content: _unit
+				path:    _systemdUnitPath
+				content: _systemdUnit
+			}
+		}
+		if coffeectx.autolaunch if context.os == "linux" {
+			"coffeectx-ui-systemd": st.#FileState & {
+				path:    _systemdUiUnitPath
+				content: _systemdUiUnit
+			}
+		}
+		if coffeectx.autolaunch if context.os == "linux" {
+			"coffeectx-systemd-reload": st.#ShellState & {
+				run:   "systemctl --user daemon-reload"
+				order: 74
 			}
 		}
 		if coffeectx.autolaunch if context.os == "linux" {
 			"coffeectx-systemd-enable": st.#ShellState & {
-				run:    "systemctl --user enable --now coffeectx.service"
-				unless: "systemctl --user is-enabled coffeectx.service >/dev/null 2>&1"
+				run:    "systemctl --user enable --now coffeectx.service coffeectx-ui.service"
+				unless: "systemctl --user is-enabled coffeectx.service >/dev/null 2>&1 && systemctl --user is-enabled coffeectx-ui.service >/dev/null 2>&1"
+				order:  75
 			}
 		}
 	}
@@ -419,18 +463,5 @@ _plist: """
 	  <key>KeepAlive</key><true/>
 	</dict>
 	</plist>
-
-	"""
-_unitPath: "~/.config/systemd/user/coffeectx.service"
-_unit: """
-	[Unit]
-	Description=CoffeeCtx daemon
-
-	[Service]
-	ExecStart=coffeectx daemonize
-	Restart=on-failure
-
-	[Install]
-	WantedBy=default.target
 
 	"""

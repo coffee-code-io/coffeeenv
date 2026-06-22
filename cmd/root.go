@@ -4,6 +4,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -37,6 +38,13 @@ func Execute() error {
 
 func init() {
 	rootCmd.AddCommand(pullCmd, planCmd, applyCmd, planSkillCmd, applySkillCmd, venvCmd)
+}
+
+func globalRoot() string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home
+	}
+	return "~"
 }
 
 // target is a resolved plan/apply destination: the composition manifest (its
@@ -81,7 +89,7 @@ func loadTarget(venvName string) (target, error) {
 	}
 	return target{
 		manifest: m,
-		opts:     cuelib.Opts{Engine: "global", Root: "~"},
+		opts:     cuelib.Opts{Engine: "global", Root: globalRoot()},
 		save:     writeGlobalManifest,
 		label:    "global",
 	}, nil
@@ -113,7 +121,7 @@ func resolveTarget(ctx context.Context, chartArg, venvName, materialize string, 
 		m.Values = mergeValues(m.Values, values)
 		return target{
 			manifest: m,
-			opts:     cuelib.Opts{Engine: "global", Root: "~"},
+			opts:     cuelib.Opts{Engine: "global", Root: globalRoot()},
 			label:    fmt.Sprintf("materialize %s", materialize),
 		}, nil
 	}
