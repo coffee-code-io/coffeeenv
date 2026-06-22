@@ -148,8 +148,10 @@ func (fileHandler) Apply(_ context.Context, a Action) error {
 
 type filePayload struct {
 	path     string
+	srcPath  string
 	content  []byte
 	mode     os.FileMode
+	sudo     bool
 	mkdirAll bool
 	dirPerm  os.FileMode
 }

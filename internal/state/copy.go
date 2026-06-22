@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/coffee-code-io/coffeeenv/internal/sys"
@@ -23,6 +24,9 @@ type copyDesired struct {
 	Src      string `json:"src"`
 	Dst      string `json:"dst"`
 	Perm     uint32 `json:"perm"`
+	Host     bool   `json:"host"`
+	Sudo     bool   `json:"sudo"`
+	DstFile  bool   `json:"dst_file"`
 	MkdirAll *bool  `json:"mkdir_all"`
 	DirPerm  uint32 `json:"dir_perm"`
 }
@@ -49,6 +53,9 @@ func (copyHandler) Decode(rs RawState) (Desired, error) {
 	if p.Src == "" || p.Dst == "" {
 		return nil, errors.New("copy: src and dst are required")
 	}
+	if p.Host && !filepath.IsAbs(sys.ExpandPath(p.Src)) {
+		return nil, errors.New("copy: host src must be absolute")
+	}
 	if p.MkdirAll == nil {
 		mkdirAll := true
 		p.MkdirAll = &mkdirAll
@@ -66,6 +73,17 @@ func (copyHandler) Read(_ context.Context, desired Desired) (Observed, error) {
 
 	info, err := os.Stat(src)
 	if err != nil {
+		if d.Host && errors.Is(err, fs.ErrNotExist) {
+			mode := os.FileMode(0o644)
+			if d.Perm != 0 {
+				mode = os.FileMode(d.Perm)
+			}
+			dstAbs := filepath.Join(dst, filepath.Base(src))
+			if d.DstFile {
+				dstAbs = dst
+			}
+			return &copyObserved{pending: []copyFile{{srcAbs: src, dstAbs: dstAbs, mode: mode}}}, nil
+		}
 		return nil, fmt.Errorf("copy: src %q: %w", src, err)
 	}
 
@@ -114,7 +132,11 @@ func (copyHandler) Read(_ context.Context, desired Desired) (Observed, error) {
 			return nil, fmt.Errorf("copy: walk %q: %w", src, err)
 		}
 	} else {
-		if err := add(src, filepath.Join(dst, filepath.Base(src)), info.Mode().Perm()); err != nil {
+		dstAbs := filepath.Join(dst, filepath.Base(src))
+		if d.DstFile {
+			dstAbs = dst
+		}
+		if err := add(src, dstAbs, info.Mode().Perm()); err != nil {
 			return nil, err
 		}
 	}
@@ -134,7 +156,7 @@ func (copyHandler) Read(_ context.Context, desired Desired) (Observed, error) {
 		if err != nil {
 			return nil, err
 		}
-		if sys.HashBytes(existing) != sys.HashBytes(cf.content) || info.Mode().Perm() != cf.mode {
+		if cf.content == nil || sys.HashBytes(existing) != sys.HashBytes(cf.content) || info.Mode().Perm() != cf.mode {
 			obs.pending = append(obs.pending, cf)
 		}
 	}
@@ -150,7 +172,7 @@ func (copyHandler) Diff(desired Desired, observed Observed) ([]Action, error) {
 			StateName: d.Dst,
 			Kind:      "copy-file",
 			Summary:   fmt.Sprintf("copy %s -> %s", cf.srcAbs, cf.dstAbs),
-			Payload:   filePayload{path: cf.dstAbs, content: cf.content, mode: cf.mode, mkdirAll: *d.MkdirAll, dirPerm: os.FileMode(d.DirPerm)},
+			Payload:   filePayload{path: cf.dstAbs, srcPath: cf.srcAbs, content: cf.content, mode: cf.mode, sudo: d.Sudo, mkdirAll: *d.MkdirAll, dirPerm: os.FileMode(d.DirPerm)},
 		})
 	}
 	return acts, nil
@@ -158,5 +180,37 @@ func (copyHandler) Diff(desired Desired, observed Observed) ([]Action, error) {
 
 func (copyHandler) Apply(_ context.Context, a Action) error {
 	p := a.Payload.(filePayload)
-	return sys.WriteFileAtomicWithOptions(p.path, p.content, p.mode, p.mkdirAll, p.dirPerm)
+	content := p.content
+	if content == nil {
+		b, err := os.ReadFile(p.srcPath)
+		if err != nil {
+			return err
+		}
+		content = b
+	}
+	if !p.sudo {
+		return sys.WriteFileAtomicWithOptions(p.path, content, p.mode, p.mkdirAll, p.dirPerm)
+	}
+	if p.mkdirAll {
+		if err := exec.Command("sudo", "mkdir", "-p", filepath.Dir(p.path)).Run(); err != nil {
+			return err
+		}
+		if err := exec.Command("sudo", "chmod", fmt.Sprintf("%#o", p.dirPerm), filepath.Dir(p.path)).Run(); err != nil {
+			return err
+		}
+	}
+	tmp, err := os.CreateTemp("", "coffeeenv-copy-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return exec.Command("sudo", "install", "-m", fmt.Sprintf("%#o", p.mode), tmpName, p.path).Run()
 }

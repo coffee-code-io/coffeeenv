@@ -69,6 +69,46 @@ func TestCopyHandler(t *testing.T) {
 // TestCopyHandlerSkipsMetadata: a copy never installs coffeeenv-internal
 // scaffolding (cue.mod/, manifest.json, coffeeenv.lock.json) — so a pulled skill
 // dir copies only its real content.
+func TestCopyHandlerDstFile(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src", "tool")
+	dst := filepath.Join(root, "bin", "renamed")
+	mustWrite(t, src, "tool")
+
+	h := copyHandler{}
+	d, err := h.Decode(RawState{Type: "copy", Name: "k", Params: map[string]any{"src": src, "dst": dst, "dst_file": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := h.Read(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acts, err := h.Diff(d, obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acts) != 1 {
+		t.Fatalf("want one action, got %d", len(acts))
+	}
+	if err := h.Apply(context.Background(), acts[0]); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, dst); got != "tool" {
+		t.Fatalf("dst file = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dst, filepath.Base(src))); err == nil {
+		t.Fatalf("dst_file should not create nested basename")
+	}
+}
+
+func TestCopyHandlerHostRequiresAbsoluteSrc(t *testing.T) {
+	_, err := copyHandler{}.Decode(RawState{Type: "copy", Name: "k", Params: map[string]any{"src": "relative", "dst": "/tmp/x", "host": true}})
+	if err == nil {
+		t.Fatal("expected host copy with relative src to fail")
+	}
+}
+
 func TestCopyHandlerPermOverride(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")

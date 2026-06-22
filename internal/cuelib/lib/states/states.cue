@@ -89,6 +89,11 @@ package states
 	src:       string
 	dst:       string
 	perm?:     int
+	// host marks src as an absolute path on the target host instead of a chart file.
+	host:      bool | *false
+	// dst_file treats dst as the exact destination file for a file src.
+	dst_file:  bool | *false
+	sudo:      bool | *false
 	mkdir_all: bool | *true
 	dir_perm:  int | *0o755
 }
