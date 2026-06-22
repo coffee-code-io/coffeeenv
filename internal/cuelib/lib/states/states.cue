@@ -93,6 +93,31 @@ package states
 	dir_perm:  int | *0o755
 }
 
+// #IgnoreFileState ensures one or more exact lines exist in .gitignore-like
+// files, appending only missing lines and preserving existing content.
+#IgnoreFileState: {
+	type:      "ignorefile"
+	order:     int | *50
+	path:      string
+	line?:     string
+	lines?: [...string]
+	mkdir_all: bool | *true
+	dir_perm:  int | *0o755
+}
+
+// #LnState creates a filesystem link. Links are symbolic by default. With force
+// true (default), an existing wrong destination is replaced.
+#LnState: {
+	type:      "ln"
+	order:     int | *50
+	src:       string
+	dst:       string
+	soft:      bool | *true
+	force:     bool | *true
+	mkdir_all: bool | *true
+	dir_perm:  int | *0o755
+}
+
 // #EnvState manages one environment variable in a managed export file. target
 // is the activate file path; empty means the global ~/.config/coffeeenv/activate.sh.
 // expand: when true the value is double-quoted so shell references like $PATH
@@ -115,4 +140,4 @@ package states
 }
 
 // #State is any basic state; used to type the top-level states map.
-#State: #NpmState | #PnpmState | #GoState | #CargoState | #PipState | #FileState | #CopyState | #EnvState | #ShellState
+#State: #NpmState | #PnpmState | #GoState | #CargoState | #PipState | #FileState | #CopyState | #IgnoreFileState | #LnState | #EnvState | #ShellState

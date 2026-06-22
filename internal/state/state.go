@@ -150,6 +150,10 @@ func handlerTypeOf(a Action) string {
 		return "file"
 	case "copy-file":
 		return "copy"
+	case "append-ignore-lines":
+		return "ignorefile"
+	case "link":
+		return "ln"
 	case "set-env":
 		return "env"
 	case "run":
